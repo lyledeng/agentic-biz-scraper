@@ -15,8 +15,11 @@ public sealed record BrowserScreenshotBytes(ReadOnlyMemory<byte> Bytes) : Browse
 public sealed record BrowserObservation(
     string CurrentUrl,
     string PageTitle,
-    BrowserScreenshot? Screenshot,
     IReadOnlyList<string> AttemptedSelectors,
     BrowserActionType ActionType,
     string? TargetDescription,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp,
+    BrowserScreenshot? Screenshot = null)
+{
+    public string Url => CurrentUrl;
+}

@@ -27,7 +27,13 @@ internal sealed class FillActionHandler(TargetResolver targetResolver) : IAction
         if (action.Target is not null)
         {
             var timeoutMs = context.Environment?.SelectorTimeoutMs ?? DefaultSelectorTimeoutMs;
-            var locator = await targetResolver.ResolveAsync(action.Target, context.Page, context.Variables, timeoutMs, cancellationToken);
+            var locator = await targetResolver.ResolveAsync(
+                action.Target,
+                context.Page,
+                context.Variables,
+                timeoutMs,
+                cancellationToken,
+                BrowserActionType.Fill);
             await locator.FillAsync(value);
         }
         else

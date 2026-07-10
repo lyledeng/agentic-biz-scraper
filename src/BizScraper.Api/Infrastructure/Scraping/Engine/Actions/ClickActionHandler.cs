@@ -21,7 +21,13 @@ internal sealed class ClickActionHandler(TargetResolver targetResolver) : IActio
         if (action.Target is not null)
         {
             var timeoutMs = context.Environment?.SelectorTimeoutMs ?? DefaultSelectorTimeoutMs;
-            locator = await targetResolver.ResolveAsync(action.Target, context.Page, context.Variables, timeoutMs, cancellationToken);
+            locator = await targetResolver.ResolveAsync(
+                action.Target,
+                context.Page,
+                context.Variables,
+                timeoutMs,
+                cancellationToken,
+                BrowserActionType.Click);
         }
         else
         {
