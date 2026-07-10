@@ -1,0 +1,215 @@
+{
+  "_note": "This is a design-time API contract describing the consumer-facing schema. The production engine definition in src/BizScraper.Api/Infrastructure/Scraping/Definitions/ uses a different metadata format (definitionSlug, endpoint) per FlowDefinitionV2 schema.",
+  "$schema": "http://localhost:3000/schemas/script-definition-v2.json",
+  "metadata": {
+    "name": "us-mo-entity-details",
+    "state": "MO",
+    "action": "entity-details",
+    "description": "Missouri Secretary of State entity detail retrieval. Navigate to entity detail page by ID, extract General Info + Principal Office Address from designated tabs, enumerate and download filing PDFs to Azure Blob Storage.",
+    "version": "1.0",
+    "audience": "v2-api-consumers",
+    "maintainer": "BizScraper.Api",
+    "lastUpdated": "2026-04-04",
+    "baseurl": "https://bsd.sos.mo.gov/BusinessEntity/BusinessEntityDetail.aspx?page=beSearch&ID="
+  },
+  "variables": {
+    "uniqueKey": {
+      "type": "string",
+      "required": true,
+      "description": "Base64url-encoded JSON key: { \"state\": \"MO\", \"id\": \"{entityId}\" }"
+    },
+    "correlationId": {
+      "type": "string",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    }
+  },
+  "actions": [
+    {
+      "id": "decode-unique-key",
+      "type": "script",
+      "description": "Decode base64url uniqueKey to extract the MO entity ID",
+      "scriptRef": "decodeUniqueKey",
+      "storeAs": "entityId"
+    },
+    {
+      "id": "navigate-detail-page",
+      "type": "navigate",
+      "description": "Load the entity detail page by ID",
+      "url": "https://bsd.sos.mo.gov/BusinessEntity/BusinessEntityDetail.aspx?page=beSearch&ID=${entityId}",
+      "timeout": 15000,
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-general-info-tab",
+      "type": "wait-for-selector",
+      "description": "Wait for the General Information tab content to render",
+      "selectors": [
+        {
+          "type": "text",
+          "value": "General Information",
+          "timeout": 5000
+        }
+      ],
+      "screenshot": { "milestone": "01-general-info" },
+      "errorHandling": "throw"
+    },
+    {
+      "id": "extract-general-info",
+      "type": "extract",
+      "description": "Extract fields from General Information tab: name, entityType, charterNumber, domesticity, homeState, registeredAgentName, registeredAgentAddress, status, dateFormed, duration",
+      "scriptRef": "extractMoGeneralInfo",
+      "storeAs": "details"
+    },
+    {
+      "id": "click-filings-tab",
+      "type": "click",
+      "description": "Switch to Filings tab via ASP.NET postback",
+      "selectors": [
+        {
+          "type": "text",
+          "value": "Filings"
+        }
+      ],
+      "waitAfter": "networkidle",
+      "screenshot": { "milestone": "02-filings" },
+      "errorHandling": "throw"
+    },
+    {
+      "id": "extract-filings",
+      "type": "extract",
+      "description": "Extract filing rows: action, documentType, dateFiled, effectiveDate, and PDF download link per row",
+      "scriptRef": "extractMoFilings",
+      "storeAs": "filings"
+    },
+    {
+      "id": "download-filing-pdfs",
+      "type": "loop",
+      "description": "Download each filing PDF to Azure Blob Storage. Individual failures logged, do not halt overall extraction.",
+      "loopType": "iterate",
+      "iterateOver": "filings",
+      "errorHandling": "continue-on-error",
+      "actions": [
+        {
+          "id": "download-pdf",
+          "type": "download",
+          "description": "Download filing PDF to blob storage under correlation ID folder",
+          "url": "${item.pdfUrl}",
+          "storeTo": "azure-blob",
+          "blobPath": "${correlationId}/mo/${entityId}/${item.documentType}_${item.dateFiled}.pdf",
+          "storeAs": "item.storageUrl",
+          "errorHandling": "continue-on-error"
+        }
+      ]
+    },
+    {
+      "id": "click-principal-address-tab",
+      "type": "click",
+      "description": "Switch to Principal Office Address tab via ASP.NET postback",
+      "selectors": [
+        {
+          "type": "text",
+          "value": "Principal Office Address"
+        }
+      ],
+      "waitAfter": "networkidle",
+      "screenshot": { "milestone": "03-principal-address" },
+      "errorHandling": "throw"
+    },
+    {
+      "id": "extract-principal-address",
+      "type": "extract",
+      "description": "Extract principal office address rows: addressType, address, since",
+      "scriptRef": "extractMoPrincipalAddress",
+      "storeAs": "addresses"
+    },
+    {
+      "id": "compose-result",
+      "type": "script",
+      "description": "Compose MissouriEntityDetails from details, filings (with storageUrl/fileName/error), and addresses",
+      "scriptRef": "composeMoEntityDetails",
+      "storeAs": "entityDetails"
+    }
+  ],
+  "scripts": {
+    "decodeUniqueKey": {
+      "language": "javascript",
+      "description": "Decodes base64url uniqueKey JSON and returns the 'id' field as the MO entity numeric ID."
+    },
+    "extractMoGeneralInfo": {
+      "language": "javascript",
+      "description": "Extracts General Information tab fields from the ASP.NET detail page DOM."
+    },
+    "extractMoPrincipalAddress": {
+      "language": "javascript",
+      "description": "Extracts principal office address fields from the Principal Office Address tab."
+    },
+    "extractMoFilings": {
+      "language": "javascript",
+      "description": "Extracts filing rows from the Filings tab GridView. Each row contains action, documentType, dateFiled, effectiveDate, and pdfUrl."
+    },
+    "composeMoEntityDetails": {
+      "language": "javascript",
+      "description": "Combines details, filings (with storageUrl/fileName/error per document), and addresses arrays into a single MissouriEntityDetails output object."
+    }
+  },
+  "output": {
+    "variableName": "entityDetails",
+    "type": "MissouriEntityDetails",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "uniqueKey": { "type": "string" },
+        "state": { "type": "string", "const": "MO" },
+        "details": {
+          "type": "object",
+          "description": "MissouriGeneralInfo — General Information tab fields",
+          "properties": {
+            "name": { "type": "string" },
+            "entityType": { "type": "string" },
+            "charterNumber": { "type": "string" },
+            "domesticity": { "type": "string", "description": "Domestic or Foreign" },
+            "homeState": { "type": "string", "nullable": true, "description": "Home state for foreign entities" },
+            "registeredAgentName": { "type": "string", "nullable": true },
+            "registeredAgentAddress": { "type": "string", "nullable": true },
+            "status": { "type": "string" },
+            "dateFormed": { "type": "string", "nullable": true },
+            "duration": { "type": "string", "nullable": true }
+          },
+          "required": ["name", "charterNumber", "status"]
+        },
+        "filings": {
+          "type": "array",
+          "description": "MissouriFiledDocument[] — Filings tab rows with downloaded PDFs",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": { "type": "string", "description": "Filing action type (e.g., Modify, Creation)" },
+              "documentType": { "type": "string", "description": "Document type description" },
+              "dateFiled": { "type": "string", "nullable": true },
+              "effectiveDate": { "type": "string", "nullable": true },
+              "storageUrl": { "type": "string", "nullable": true, "description": "Proxy URL to downloaded PDF" },
+              "fileName": { "type": "string", "nullable": true },
+              "error": { "type": "string", "nullable": true, "description": "Error if PDF download failed" }
+            },
+            "required": ["action", "documentType"]
+          }
+        },
+        "addresses": {
+          "type": "array",
+          "description": "MissouriPrincipalAddress[] — Principal Office Address tab rows",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addressType": { "type": "string", "description": "e.g., Reg. Office, Mailing" },
+              "address": { "type": "string" },
+              "since": { "type": "string", "nullable": true }
+            },
+            "required": ["addressType", "address"]
+          }
+        }
+      },
+      "required": ["uniqueKey", "state", "details"]
+    }
+  }
+}

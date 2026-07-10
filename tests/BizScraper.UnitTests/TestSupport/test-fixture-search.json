@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "test-only-fixture",
+    "definitionSlug": "test-fixture-search",
+    "name": "Test Fixture Search",
+    "description": "A minimal definition used by unit tests",
+    "state": "CO",
+    "endpoint": "test-search"
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    }
+  ],
+  "actions": [],
+  "output": {
+    "variableName": "results",
+    "type": "array"
+  }
+}

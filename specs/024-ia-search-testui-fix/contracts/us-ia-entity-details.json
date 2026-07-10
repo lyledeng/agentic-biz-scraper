@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "b8f4c3d2-5e6g-7h8i-9j0k-1l2m3n4o5p6q",
+    "definitionSlug": "us-ia-entity-details",
+    "name": "Iowa Entity Details",
+    "description": "Extract comprehensive entity details from Iowa SOS summary page including names, registered agent, principal office, and chapter code",
+    "state": "IA",
+    "endpoint": "entity-details"
+  },
+  "variables": [
+    {
+      "name": "detailsUrl",
+      "source": "runtime",
+      "required": true,
+      "description": "Full URL to the Iowa SOS entity summary page (injected by handler from decoded uniqueKey)"
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    {
+      "name": "details",
+      "source": "extracted",
+      "description": "Assembled entity detail object"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Navigate to Iowa SOS entity summary page",
+      "url": "${detailsUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "ia-detail-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "wait-for-condition",
+      "description": "Wait for entity summary content to render",
+      "javascript": "() => { const h1 = document.querySelector('h1'); return h1 && h1.textContent.includes('Business Entity Summary'); }",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "screenshot",
+      "description": "Screenshot entity summary page after load",
+      "milestone": "ia-detail-02-summary-loaded"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "extract",
+      "description": "Extract all entity details from table-based layout: Business No., Legal Name, Status, Type, State of Inc., Modified, Expiration Date, Effective Date, Filing Date, Chapter, Names list, Registered Agent, Principal Office",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const tables = Array.from(document.querySelectorAll('article table')); if (tables.length === 0) return JSON.stringify({ error: 'No detail tables found' }); const mainTable = tables[0]; const allCells = Array.from(mainTable.querySelectorAll('td')); const allHeaders = Array.from(mainTable.querySelectorAll('th')); const getValueByHeader = (headerText) => { for (let i = 0; i < allHeaders.length; i++) { if (normalize(allHeaders[i].textContent) === headerText) { const row = allHeaders[i].closest('tr'); const nextRow = row?.nextElementSibling; if (nextRow) { const cells = nextRow.querySelectorAll('td'); const idx = Array.from(row.querySelectorAll('th')).indexOf(allHeaders[i]); if (cells[idx]) return normalize(cells[idx].textContent); } } } return null; }; const identifier = getValueByHeader('Business No.'); const legalName = getValueByHeader('Legal Name'); const status = getValueByHeader('Status'); const entityType = getValueByHeader('Type'); const stateOfIncorporation = getValueByHeader('State of Inc.'); const modified = getValueByHeader('Modified'); const expirationDate = getValueByHeader('Expiration Date'); const effectiveDate = getValueByHeader('Effective Date'); const filingDate = getValueByHeader('Filing Date'); const chapterCode = getValueByHeader('Chapter'); const names = []; const namesHeading = Array.from(document.querySelectorAll('h2')).find(h => h.textContent.includes('Names')); if (namesHeading) { const namesTable = namesHeading.nextElementSibling; if (namesTable?.tagName === 'TABLE') { const nameRows = Array.from(namesTable.querySelectorAll('tr')).filter(r => r.querySelectorAll('td').length >= 4); nameRows.forEach(row => { const cells = Array.from(row.querySelectorAll('td')); names.push({ type: normalize(cells[0]?.textContent), status: normalize(cells[1]?.textContent), modified: normalize(cells[2]?.textContent).toLowerCase() === 'yes', name: normalize(cells[3]?.textContent) }); }); } } const extractContactTable = (headingText) => { const heading = Array.from(document.querySelectorAll('h2')).find(h => h.textContent.includes(headingText)); if (!heading) return null; const table = heading.nextElementSibling; if (!table?.tagName === 'TABLE') return null; const getValue = (hdrText) => { const headers = Array.from(table.querySelectorAll('th')); for (const hdr of headers) { if (normalize(hdr.textContent) === hdrText) { const row = hdr.closest('tr'); const nextRow = row?.nextElementSibling; if (nextRow) { const cells = nextRow.querySelectorAll('td'); const idx = Array.from(row.querySelectorAll('th')).indexOf(hdr); return cells[idx] ? normalize(cells[idx].textContent) : null; } } } return null; }; return { fullName: getValue('Full Name') || '', address: getValue('Address') || '', address2: getValue('Address 2') || null, cityStateZip: getValue('City, State, Zip') || '' }; }; const registeredAgent = extractContactTable('Registered Agent'); const principalOffice = extractContactTable('Principal Office'); const certificateNote = 'Certificate of Existence available via Iowa SOS website (paywall - not available via this API)'; return JSON.stringify({ identifier, legalName, status, entityType, stateOfIncorporation, modified: modified?.toLowerCase() === 'yes', expirationDate, effectiveDate, filingDate, chapterCode, names, registeredAgent, principalOffice, certificateNote, state: 'IA' }); }",
+      "storeAs": "details"
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "screenshot",
+      "description": "Screenshot after extraction complete",
+      "milestone": "ia-detail-03-after-extraction"
+    }
+  ],
+  "output": {
+    "variableName": "details",
+    "type": "EntityDetailResponse"
+  }
+}

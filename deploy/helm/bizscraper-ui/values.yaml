@@ -1,0 +1,72 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: devacr.azurecr.io/bizscraper-ui
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8443
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+  hosts:
+    - host: devcaas-az.ilienonline.com
+      paths:
+        - path: /mvpoc/bizscraper-ui(/|$)(.*)
+          pathType: ImplementationSpecific
+  tls:
+    - hosts:
+        - devcaas-az.ilienonline.com
+      secretName: ingress-tls-cert-secret
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 60
+
+cors:
+  testUiOrigin: ""
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  runAsGroup: 101
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+msalConfig:
+  clientId: ""
+  authority: ""
+  redirectUri: ""
+  postLogoutRedirectUri: ""
+  scopes: ""

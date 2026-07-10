@@ -1,0 +1,13 @@
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+.git/
+charts/
+values*.local.yaml
+secrets/
+.kube/
+kubeconfig*
+*.secret.yaml
+*.key
+*.crt

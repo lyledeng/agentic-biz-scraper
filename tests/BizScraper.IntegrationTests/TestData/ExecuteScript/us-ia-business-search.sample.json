@@ -1,0 +1,6 @@
+{
+  "definition": "us-ia-business-search",
+  "parameters": {
+    "searchTerm": "Acme"
+  }
+}

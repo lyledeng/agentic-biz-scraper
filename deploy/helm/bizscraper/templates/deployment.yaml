@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ .Values.hpa.minReplicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.env.ASPNETCORE_ENVIRONMENT | quote }}
+            {{- if .Values.cors.testUiOrigin }}
+            - name: ASPNETCORE_Cors__TestUiOrigin
+              value: {{ .Values.cors.testUiOrigin | quote }}
+            {{- end }}
+            - name: ConnectionStrings__AuditTrail
+              value: "Data Source=/data/bizscraper.db"
+            - name: Playwright__BrowserEndpoint
+              value: {{ .Values.playwright.browserEndpoint | quote }}
+            - name: Playwright__AccessToken
+              valueFrom:
+                secretKeyRef:
+                  name: bizscraper-playwright
+                  key: access-token
+            - name: FabAgent__CaptchaSolver__EndpointUrl
+              value: {{ .Values.fabAgent.captchaSolver.endpointUrl | quote }}
+            - name: FabAgent__CaptchaSolver__AuthToken
+              valueFrom:
+                secretKeyRef:
+                  name: bizscraper-fab
+                  key: captcha-token
+            - name: FabDocumentTranslator__EndpointUrl
+              value: {{ .Values.fabDocumentTranslator.endpointUrl | quote }}
+            - name: FabDocumentTranslator__TimeoutSeconds
+              value: {{ .Values.fabDocumentTranslator.timeoutSeconds | quote }}
+            - name: FabDocumentTranslator__AuthToken
+              valueFrom:
+                secretKeyRef:
+                  name: bizscraper-fab
+                  key: translator-token
+            {{- if .Values.pathBase }}
+            - name: PathBase
+              value: {{ .Values.pathBase | quote }}
+            {{- end }}
+            {{- if .Values.azureAd }}
+            - name: AzureAd__Instance
+              value: {{ .Values.azureAd.instance | quote }}
+            - name: AzureAd__TenantId
+              value: {{ .Values.azureAd.tenantId | quote }}
+            - name: AzureAd__ClientId
+              value: {{ .Values.azureAd.clientId | quote }}
+            - name: AzureAd__Audience
+              value: {{ .Values.azureAd.audience | quote }}
+            {{- end }}
+            - name: Playwright__Diagnostics__CloudStorage__Enabled
+              value: {{ .Values.diagnostics.cloudStorage.enabled | quote }}
+            - name: Playwright__Diagnostics__CloudStorage__ContainerName
+              value: {{ .Values.diagnostics.cloudStorage.containerName | quote }}
+            - name: Playwright__Diagnostics__CloudStorage__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: bizscraper-cloudstorage
+                  key: connection-string
+                  optional: true
+            {{- if .Values.windowsProxy.endpointUrl }}
+            - name: WindowsProxy__EndpointUrl
+              value: {{ .Values.windowsProxy.endpointUrl | quote }}
+            - name: WindowsProxy__TimeoutSeconds
+              value: {{ .Values.windowsProxy.timeoutSeconds | quote }}
+            {{- end }}
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_SERVICE_NAME
+              value: "BizScraper.Api"
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: sqlite-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.service.port }}
+              scheme: HTTPS
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.service.port }}
+              scheme: HTTPS
+      volumes:
+        - name: sqlite-data
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-sqlite-data

@@ -1,0 +1,218 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "a7e3b2c1-4d5f-6a7b-8c9d-0e1f2a3b4c5d",
+    "definitionSlug": "us-ia-business-search",
+    "name": "Iowa Business Search",
+    "description": "Search Iowa Secretary of State business entity database by name and extract paginated results",
+    "state": "IA",
+    "endpoint": "business-search"
+  },
+  "browser": {
+    "mode": "windows",
+    "channel": "msedge",
+    "headless": false
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true,
+      "description": "Business name to search (minimum 2 characters)"
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://sos.iowa.gov/search/business/Search.aspx",
+      "description": "Iowa SOS business search page URL"
+    },
+    {
+      "name": "maxPages",
+      "source": "config",
+      "defaultValue": 25,
+      "description": "Maximum number of result pages to scrape"
+    },
+    {
+      "name": "results",
+      "source": "extracted",
+      "description": "Accumulated search results across all pages"
+    },
+    {
+      "name": "pageResults",
+      "source": "extracted",
+      "description": "Results from current page"
+    },
+    {
+      "name": "paginationInfo",
+      "source": "extracted",
+      "description": "Pagination metadata"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Iowa SOS business search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "ia-search-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "wait-for-condition",
+      "description": "Wait for search form to render",
+      "javascript": "() => !!document.querySelector('input[placeholder=\"Enter business name\"]')",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "fill",
+      "description": "Enter business name into search field",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "input[placeholder='Enter business name']",
+            "confidence": 0.95
+          },
+          {
+            "strategy": "css",
+            "value": "input[type='text']",
+            "confidence": 0.5
+          }
+        ],
+        "description": "Business Name search input"
+      },
+      "value": "${searchTerm}"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "wait-for-condition",
+      "description": "Wait for submit button to be present in DOM (reCAPTCHA may delay render)",
+      "javascript": "() => !!document.querySelector('button[name=\"btnNumber\"]') || !!document.querySelector('button[type=\"submit\"]')",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "click",
+      "description": "Submit search form",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "button[name='btnNumber']",
+            "confidence": 0.95
+          },
+          {
+            "strategy": "css",
+            "value": "button[aria-label='Submit search']",
+            "confidence": 0.9
+          },
+          {
+            "strategy": "css",
+            "value": "button[type='submit']",
+            "confidence": 0.85
+          },
+          {
+            "strategy": "css",
+            "value": "button.btn-primary",
+            "confidence": 0.7
+          }
+        ],
+        "description": "Search submit button"
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "ia-search-02-results"
+      }
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "extract",
+      "description": "Extract search results from results table. Columns: Business No. (link), Name, Status, Type, Legal Name",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const tables = Array.from(document.querySelectorAll('table')); const target = tables.find(t => { const headers = Array.from(t.querySelectorAll('th')).map(th => normalize(th.textContent)); return headers.includes('Business No.') && headers.includes('Name') && headers.includes('Status'); }); if (!target) return JSON.stringify([]); const headerRow = Array.from(target.querySelectorAll('tr')).find(r => r.querySelectorAll('th').length >= 4); if (!headerRow) return JSON.stringify([]); const paginationRow = target.querySelector('tr:last-child'); const rows = Array.from(target.querySelectorAll('tr')).filter(r => { const cells = r.querySelectorAll('td'); return cells.length >= 4 && r !== paginationRow; }); return JSON.stringify(rows.filter(row => { const firstCell = row.querySelector('td'); return firstCell && firstCell.querySelector('a'); }).map(row => { const cells = Array.from(row.querySelectorAll('td')); const link = cells[0]?.querySelector('a'); const href = link?.getAttribute('href') || ''; const detailsUrl = href ? new URL(href, window.location.href).toString() : ''; return { identifier: normalize(cells[0]?.textContent), name: normalize(cells[1]?.textContent), status: normalize(cells[2]?.textContent), entityType: normalize(cells[3]?.textContent), legalName: cells.length >= 5 ? normalize(cells[4]?.textContent) : null, state: 'IA', detailsUrl: detailsUrl, formationDate: null, searchResultType: normalize(cells[3]?.textContent) === 'Fictitious name' ? 'fictitious-name' : 'legal-name' }; })); }",
+      "storeAs": "results"
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "extract",
+      "description": "Extract pagination metadata (e.g., 'Results 1 - 25 of 153')",
+      "javascript": "() => { const text = document.body.innerText || ''; const match = text.match(/Results\\s+(\\d+)\\s*-\\s*(\\d+)\\s+of\\s+(\\d+)/i); return match ? JSON.stringify({ start: parseInt(match[1]), end: parseInt(match[2]), siteTotalCount: parseInt(match[3]), currentPage: Math.ceil(parseInt(match[1]) / 25), totalPages: Math.ceil(parseInt(match[3]) / 25) }) : JSON.stringify({ siteTotalCount: 0, currentPage: 1, totalPages: 1 }); }",
+      "storeAs": "paginationInfo"
+    },
+    {
+      "id": "action-007",
+      "order": 7,
+      "type": "loop",
+      "description": "Paginate through remaining result pages via numbered page links",
+      "loopType": "pagination",
+      "maxIterations": 25,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "element-exists",
+          "selector": "table td a[href*='results.aspx']"
+        }
+      },
+      "actions": [
+        {
+          "id": "action-008",
+          "order": 8,
+          "type": "extract",
+          "description": "Determine next page number and find its link",
+          "javascript": "() => { const cells = Array.from(document.querySelectorAll('table td')); const paginationCell = cells.find(c => { const links = c.querySelectorAll('a[href*=\"results.aspx\"]'); return links.length > 0; }); if (!paginationCell) return JSON.stringify(null); const textNodes = paginationCell.childNodes; let currentPage = null; for (const node of textNodes) { if (node.nodeType === 3) { const num = node.textContent.trim().match(/^(\\d+)$/); if (num) { currentPage = parseInt(num[1]); break; } } } if (!currentPage) return JSON.stringify(null); const nextNum = currentPage + 1; const links = paginationCell.querySelectorAll('a[href*=\"results.aspx\"]'); for (const link of links) { if (link.textContent.trim() === String(nextNum)) { return JSON.stringify({ nextPage: nextNum, href: link.getAttribute('href') }); } } return JSON.stringify(null); }",
+          "storeAs": "nextPageInfo"
+        },
+        {
+          "id": "action-009",
+          "order": 9,
+          "type": "click",
+          "description": "Click next page number link",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "table td a[href*='results.aspx']",
+                "confidence": 0.7
+              }
+            ],
+            "description": "Next page number link"
+          },
+          "waitAfter": "networkidle",
+          "screenshot": {
+            "milestone": "ia-search-03-page-${currentPage}"
+          }
+        },
+        {
+          "id": "action-010",
+          "order": 10,
+          "type": "extract",
+          "description": "Extract results from next page",
+          "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const tables = Array.from(document.querySelectorAll('table')); const target = tables.find(t => { const headers = Array.from(t.querySelectorAll('th')).map(th => normalize(th.textContent)); return headers.includes('Business No.') && headers.includes('Name') && headers.includes('Status'); }); if (!target) return JSON.stringify([]); const rows = Array.from(target.querySelectorAll('tr')).filter(r => { const cells = r.querySelectorAll('td'); const firstCell = r.querySelector('td'); return cells.length >= 4 && firstCell && firstCell.querySelector('a'); }); return JSON.stringify(rows.map(row => { const cells = Array.from(row.querySelectorAll('td')); const link = cells[0]?.querySelector('a'); const href = link?.getAttribute('href') || ''; const detailsUrl = href ? new URL(href, window.location.href).toString() : ''; return { identifier: normalize(cells[0]?.textContent), name: normalize(cells[1]?.textContent), status: normalize(cells[2]?.textContent), entityType: normalize(cells[3]?.textContent), legalName: cells.length >= 5 ? normalize(cells[4]?.textContent) : null, state: 'IA', detailsUrl: detailsUrl, formationDate: null, searchResultType: normalize(cells[3]?.textContent) === 'Fictitious name' ? 'fictitious-name' : 'legal-name' }; })); }",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "BusinessEntityResult[]"
+  }
+}

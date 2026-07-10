@@ -1,0 +1,132 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Scraping Flow Definition",
+  "description": "Declarative definition of a browser scraping workflow executed by the BizScraper engine.",
+  "type": "object",
+  "required": ["schemaVersion", "name", "state", "endpoint", "variables", "actions", "output"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version for forward compatibility checks."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable flow name."
+    },
+    "state": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 2,
+      "description": "Two-letter state code (e.g., CO, WY)."
+    },
+    "endpoint": {
+      "type": "string",
+      "enum": ["business-search", "entity-details"],
+      "description": "Endpoint identifier this flow serves."
+    },
+    "variables": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Variable" },
+      "description": "Variables available during flow execution."
+    },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Action" },
+      "minItems": 1,
+      "description": "Ordered list of actions to execute."
+    },
+    "output": { "$ref": "#/definitions/OutputDeclaration" }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Variable": {
+      "type": "object",
+      "required": ["name", "source"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "enum": ["runtime", "config", "extracted"] },
+        "required": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "OutputDeclaration": {
+      "type": "object",
+      "required": ["variableName", "type"],
+      "properties": {
+        "variableName": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "ScreenshotConfig": {
+      "type": "object",
+      "required": ["milestone"],
+      "properties": {
+        "milestone": { "type": "string", "minLength": 1 },
+        "force": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "Condition": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["element-exists", "element-visible", "text-contains", "variable-truthy", "variable-falsy", "not"]
+        },
+        "selector": { "type": "string" },
+        "text": { "type": "string" },
+        "variableName": { "type": "string" },
+        "condition": { "$ref": "#/definitions/Condition" }
+      },
+      "additionalProperties": false
+    },
+    "Action": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["navigate", "fill", "click", "wait-for-load", "wait-for-condition", "extract", "check-text", "screenshot", "download", "loop", "call-service"]
+        },
+        "description": { "type": "string" },
+        "screenshot": { "$ref": "#/definitions/ScreenshotConfig" },
+        "condition": { "$ref": "#/definitions/Condition" },
+        "url": { "type": "string" },
+        "waitUntil": { "type": "string", "enum": ["networkidle", "domcontentloaded", "load"] },
+        "selector": { "type": "string" },
+        "value": { "type": "string" },
+        "waitAfter": { "type": "string", "enum": ["networkidle", "domcontentloaded", "load"] },
+        "state": { "type": "string", "enum": ["networkidle", "domcontentloaded", "load"] },
+        "javascript": { "type": "string" },
+        "timeoutMs": { "type": "integer", "minimum": 0 },
+        "storeAs": { "type": "string" },
+        "postProcessor": { "type": "string" },
+        "pattern": { "type": "string" },
+        "isRegex": { "type": "boolean" },
+        "onMatch": { "type": "string", "enum": ["throw", "skip", "continue"] },
+        "errorType": { "type": "string" },
+        "milestone": { "type": "string" },
+        "force": { "type": "boolean" },
+        "linkSelector": { "type": "string" },
+        "validateExtension": { "type": "string" },
+        "filenamePattern": { "type": "string" },
+        "loopType": { "type": "string", "enum": ["pagination", "retry"] },
+        "maxIterations": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^\\$\\{.+\\}$" }] },
+        "aggregateInto": { "type": "string", "description": "Variable name to accumulate extraction results across pagination loop iterations." },
+        "terminateWhen": { "$ref": "#/definitions/Condition" },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" }
+        },
+        "serviceName": { "type": "string" },
+        "inputVariable": { "type": "string" },
+        "outputVariable": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

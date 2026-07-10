@@ -1,0 +1,255 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "ac376f5e-c411-4d6b-bb83-ba3a997e4e3c",
+    "definitionSlug": "us-wy-business-search",
+    "name": "Wyoming Business Search",
+    "description": "Search Wyoming Secretary of State business filings",
+    "state": "WY",
+    "endpoint": "business-search"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "maxPages",
+      "source": "config"
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://wyobiz.wyo.gov/Business/FilingSearch.aspx"
+    },
+    {
+      "name": "results",
+      "source": "extracted"
+    },
+    {
+      "name": "pageResults",
+      "source": "extracted"
+    },
+    {
+      "name": "captchaImageBytes",
+      "source": "extracted"
+    },
+    {
+      "name": "captchaSolution",
+      "source": "extracted"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Wyoming SOS search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "wy-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "loop",
+      "description": "Solve CAPTCHA if present (retry up to 3 times)",
+      "loopType": "retry",
+      "maxIterations": 3,
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "text-contains",
+          "text": "What code is in the image?"
+        }
+      },
+      "actions": [
+        {
+          "id": "action-002",
+          "order": 2,
+          "type": "extract",
+          "description": "Capture CAPTCHA image bytes",
+          "javascript": "async () =\u003E { const images = Array.from(document.querySelectorAll(\u0027img\u0027)); let best = null; let bestArea = 0; for (const img of images) { const rect = img.getBoundingClientRect(); const area = rect.width * rect.height; if (area \u003E 6000 \u0026\u0026 area \u003E bestArea \u0026\u0026 img.offsetParent !== null) { best = img; bestArea = area; } } if (!best) return null; const canvas = document.createElement(\u0027canvas\u0027); canvas.width = best.naturalWidth || best.width; canvas.height = best.naturalHeight || best.height; const ctx = canvas.getContext(\u00272d\u0027); ctx.drawImage(best, 0, 0); const dataUrl = canvas.toDataURL(\u0027image/png\u0027); return dataUrl; }",
+          "storeAs": "captchaImageDataUrl"
+        },
+        {
+          "id": "action-003",
+          "order": 3,
+          "type": "screenshot",
+          "description": "Screenshot CAPTCHA challenge",
+          "milestone": "wy-captcha-challenge-attempt-${iterationCount}",
+          "force": true
+        },
+        {
+          "id": "action-004",
+          "order": 4,
+          "type": "call-service",
+          "description": "Solve CAPTCHA via external service",
+          "serviceName": "captcha-solver",
+          "inputVariable": "captchaImageDataUrl",
+          "outputVariable": "captchaSolution"
+        },
+        {
+          "id": "action-005",
+          "order": 5,
+          "type": "fill",
+          "description": "Enter CAPTCHA solution",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "#ans, #MainContent_txtCaptcha, input[name=\u0027answer\u0027], input[name*=\u0027Captcha\u0027], input[name*=\u0027captcha\u0027]",
+                "confidence": 1
+              }
+            ]
+          },
+          "value": "${captchaSolution}"
+        },
+        {
+          "id": "action-006",
+          "order": 6,
+          "type": "click",
+          "description": "Submit CAPTCHA",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "#jar, #MainContent_btnSubmit, button[type=\u0027submit\u0027], input[type=\u0027submit\u0027]",
+                "confidence": 1
+              }
+            ]
+          },
+          "waitAfter": "networkidle"
+        },
+        {
+          "id": "action-007",
+          "order": 7,
+          "type": "screenshot",
+          "description": "Screenshot after CAPTCHA submission",
+          "milestone": "wy-captcha-submitted-attempt-${iterationCount}",
+          "force": true
+        }
+      ]
+    },
+    {
+      "id": "action-008",
+      "order": 8,
+      "type": "fill",
+      "description": "Enter business name",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "#MainContent_txtFilingName",
+            "confidence": 1
+          }
+        ]
+      },
+      "value": "${searchTerm}"
+    },
+    {
+      "id": "action-009",
+      "order": 9,
+      "type": "click",
+      "description": "Submit search form",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "#MainContent_cmdSearch",
+            "confidence": 1
+          }
+        ]
+      },
+      "waitAfter": "networkidle"
+    },
+    {
+      "id": "action-010",
+      "order": 10,
+      "type": "wait-for-condition",
+      "description": "Wait for results to appear",
+      "javascript": "() =\u003E { const body = document.body?.innerText || \u0027\u0027; return body.includes(\u0027RESULTS:\u0027) || body.includes(\u0027Results:\u0027) || !!document.querySelector(\u0027#MainContent_grdSearchResults tr td, table[id*=\u0022SearchResults\u0022] tr td\u0027); }",
+      "timeoutMs": 5000
+    },
+    {
+      "id": "action-011",
+      "order": 11,
+      "type": "screenshot",
+      "description": "Screenshot search results",
+      "milestone": "wy-02-search-results"
+    },
+    {
+      "id": "action-012",
+      "order": 12,
+      "type": "extract",
+      "description": "Extract search results and total count",
+      "javascript": "() =\u003E { const normalize = (value) =\u003E (value || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const detailLinkSelector = \u0022a[href*=\u0027FilingDetails.aspx\u0027], a[href*=\u0027eFNum=\u0027]\u0022; const links = Array.from(document.querySelectorAll(detailLinkSelector)); const results = []; const seen = new Set(); for (const link of links) { const detailsHref = link.getAttribute(\u0027href\u0027) || \u0027\u0027; const detailsUrl = detailsHref ? new URL(detailsHref, window.location.href).toString() : \u0027\u0027; if (!detailsUrl || seen.has(detailsUrl)) continue; const row = link.closest(\u0027tr\u0027); const rowText = normalize(row?.textContent); let combinedText = rowText; if (row) { const nextRow = row.nextElementSibling; const nextRowHasDetailsLink = !!nextRow?.querySelector(detailLinkSelector); const nextRowText = normalize(nextRow?.textContent); if (nextRowText \u0026\u0026 !nextRowHasDetailsLink) { combinedText = normalize(\u0060${rowText} ${nextRowText}\u0060); } } if (!combinedText) { combinedText = normalize(link.closest(\u0027table, div, li\u0027)?.textContent) || normalize(link.textContent); } if (!combinedText) continue; results.push({ text: combinedText, detailsUrl }); seen.add(detailsUrl); } return JSON.stringify(results); }",
+      "storeAs": "results"
+    },
+    {
+      "id": "action-013",
+      "order": 13,
+      "type": "loop",
+      "description": "Paginate through remaining pages",
+      "loopType": "pagination",
+      "maxIterations": 25,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "element-visible",
+          "selector": "#MainContent_lbtnNextHeader"
+        }
+      },
+      "actions": [
+        {
+          "id": "action-014",
+          "order": 14,
+          "type": "click",
+          "description": "Click next page",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "#MainContent_lbtnNextHeader",
+                "confidence": 1
+              }
+            ]
+          },
+          "waitAfter": "networkidle"
+        },
+        {
+          "id": "action-015",
+          "order": 15,
+          "type": "screenshot",
+          "description": "Screenshot pagination page",
+          "milestone": "wy-03-page-${currentPage}"
+        },
+        {
+          "id": "action-016",
+          "order": 16,
+          "type": "extract",
+          "description": "Extract page results",
+          "javascript": "() =\u003E { const normalize = (value) =\u003E (value || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const detailLinkSelector = \u0022a[href*=\u0027FilingDetails.aspx\u0027], a[href*=\u0027eFNum=\u0027]\u0022; const links = Array.from(document.querySelectorAll(detailLinkSelector)); const results = []; const seen = new Set(); for (const link of links) { const detailsHref = link.getAttribute(\u0027href\u0027) || \u0027\u0027; const detailsUrl = detailsHref ? new URL(detailsHref, window.location.href).toString() : \u0027\u0027; if (!detailsUrl || seen.has(detailsUrl)) continue; const row = link.closest(\u0027tr\u0027); const rowText = normalize(row?.textContent); let combinedText = rowText; if (row) { const nextRow = row.nextElementSibling; const nextRowHasDetailsLink = !!nextRow?.querySelector(detailLinkSelector); const nextRowText = normalize(nextRow?.textContent); if (nextRowText \u0026\u0026 !nextRowHasDetailsLink) { combinedText = normalize(\u0060${rowText} ${nextRowText}\u0060); } } if (!combinedText) { combinedText = normalize(link.closest(\u0027table, div, li\u0027)?.textContent) || normalize(link.textContent); } if (!combinedText) continue; results.push({ text: combinedText, detailsUrl }); seen.add(detailsUrl); } return JSON.stringify(results); }",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "NormalizedSearchResult[]"
+  }
+}

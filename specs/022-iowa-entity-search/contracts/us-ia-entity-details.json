@@ -1,0 +1,420 @@
+{
+  "$schema": "http://localhost:3000/schemas/script-definition-v2.json",
+  "metadata": {
+    "name": "us-ia-entity-details",
+    "state": "IA",
+    "action": "entity-details",
+    "description": "Iowa Secretary of State entity detail page scraper. Retrieves comprehensive entity information including names, agent, addresses, dates, and certificate status.",
+    "version": "1.0",
+    "audience": "v2-api-consumers",
+    "maintainer": "BizScraper.Api",
+    "lastUpdated": "2026-04-01",
+    "baseurl": "https://sos.iowa.gov/search/business/Entity.aspx"
+  },
+  "variables": {
+    "uniqueKey": {
+      "type": "string",
+      "required": true,
+      "description": "Base64URL-encoded drill-down reference from search result. Contains: state, businessNumber, encrypted URL.",
+      "validation": {
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "decoding": {
+        "format": "base64url",
+        "jsonSchema": {
+          "state": "string",
+          "businessNumber": "string",
+          "url": "string"
+        }
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    }
+  },
+  "actions": [
+    {
+      "id": "decode-unique-key",
+      "type": "decode",
+      "description": "Decode uniqueKey to extract drill-down URL",
+      "format": "base64url",
+      "source": "{{uniqueKey}}",
+      "target": "decodedKey",
+      "errorHandling": "throw"
+    },
+    {
+      "id": "navigate-detail-page",
+      "type": "navigate",
+      "description": "Navigate to entity detail page using decoded URL",
+      "url": "{{decodedKey.url}}",
+      "timeout": 10000,
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-for-detail-content",
+      "type": "wait-for-selector",
+      "description": "Ensure detail page content is rendered",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "div.entity-header, div.detail-body",
+          "timeout": 5000
+        }
+      ],
+      "errorHandling": "throw"
+    },
+    {
+      "id": "extract-legal-name",
+      "type": "extract",
+      "description": "Extract legal entity name",
+      "selector": {
+        "type": "css",
+        "value": "div.entity-name h1, span.legal-name, td.entity-name-value"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "legalName",
+      "fallback": "Unknown"
+    },
+    {
+      "id": "extract-identifier",
+      "type": "extract",
+      "description": "Extract Iowa business registration number",
+      "selector": {
+        "type": "css",
+        "value": "span.business-number, td:contains('Business Number') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "identifier",
+      "regex": "[0-9]+",
+      "fallback": "{{decodedKey.businessNumber}}"
+    },
+    {
+      "id": "extract-status",
+      "type": "extract",
+      "description": "Extract registration status",
+      "selector": {
+        "type": "css",
+        "value": "span.status, td:contains('Status') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "status",
+      "regex": "Active|Inactive|Dissolved|Merged",
+      "fallback": "Unknown"
+    },
+    {
+      "id": "extract-entity-type",
+      "type": "extract",
+      "description": "Extract entity type (Legal/Fictitious)",
+      "selector": {
+        "type": "css",
+        "value": "span.entity-type, td:contains('Entity Type') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "entityType",
+      "fallback": "Legal"
+    },
+    {
+      "id": "extract-chapter-code",
+      "type": "extract",
+      "description": "Extract legal code/chapter designation",
+      "selector": {
+        "type": "css",
+        "value": "span.chapter-code, td:contains('Chapter') + td, td:contains('Code') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "chapterCode",
+      "fallback": "Not Available"
+    },
+    {
+      "id": "extract-filing-date",
+      "type": "extract",
+      "description": "Extract original filing date",
+      "selector": {
+        "type": "css",
+        "value": "span.filing-date, td:contains('Filing Date') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "filingDate",
+      "transform": "date-to-iso8601",
+      "fallback": null
+    },
+    {
+      "id": "extract-effective-date",
+      "type": "extract",
+      "description": "Extract effective registration date",
+      "selector": {
+        "type": "css",
+        "value": "span.effective-date, td:contains('Effective Date') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "effectiveDate",
+      "transform": "date-to-iso8601",
+      "fallback": null
+    },
+    {
+      "id": "extract-expiration-date",
+      "type": "extract",
+      "description": "Extract certificate/registration expiration date",
+      "selector": {
+        "type": "css",
+        "value": "span.expiration-date, td:contains('Expiration') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "expirationDate",
+      "transform": "date-to-iso8601",
+      "fallback": null,
+      "optional": true
+    },
+    {
+      "id": "extract-modified-flag",
+      "type": "check-text",
+      "description": "Check if entity has been modified",
+      "text": "modified|amendment|amended",
+      "selector": {
+        "type": "css",
+        "value": "div.modification-notice, span.amended-flag"
+      },
+      "onMatch": {
+        "target": "modified",
+        "value": true
+      },
+      "onNoMatch": {
+        "target": "modified",
+        "value": false
+      }
+    },
+    {
+      "id": "extract-state-of-incorporation",
+      "type": "extract",
+      "description": "Extract state of incorporation",
+      "selector": {
+        "type": "css",
+        "value": "span.state-of-inc, td:contains('State of Incorporation') + td"
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "stateOfIncorporation",
+      "fallback": "IA"
+    },
+    {
+      "id": "extract-registered-agent",
+      "type": "extract-group",
+      "description": "Extract registered agent information",
+      "selectors": {
+        "agentName": {
+          "type": "css",
+          "value": "div.registered-agent-name, td:contains('Agent Name') + td"
+        },
+        "agentAddress": {
+          "type": "css",
+          "value": "div.registered-agent-address, td:contains('Agent Address') + td"
+        },
+        "agentAddress2": {
+          "type": "css",
+          "value": "div.registered-agent-address2, td:contains('Agent Address2') + td",
+          "optional": true
+        },
+        "agentCityStateZip": {
+          "type": "css",
+          "value": "div.registered-agent-csz, td:contains('Agent City/State/Zip') + td"
+        }
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "registeredAgent",
+      "transform": {
+        "type": "javascript",
+        "code": "return {\n  fullName: agentName || 'Not Available',\n  address: agentAddress || '',\n  address2: agentAddress2 || null,\n  cityStateZip: agentCityStateZip || ''\n};"
+      }
+    },
+    {
+      "id": "extract-principal-office",
+      "type": "extract-group",
+      "description": "Extract principal office address",
+      "selectors": {
+        "officeAddress": {
+          "type": "css",
+          "value": "div.principal-office-address, td:contains('Principal Address') + td"
+        },
+        "officeAddress2": {
+          "type": "css",
+          "value": "div.principal-office-address2, td:contains('Principal Address2') + td",
+          "optional": true
+        },
+        "officeCityStateZip": {
+          "type": "css",
+          "value": "div.principal-office-csz, td:contains('Principal City/State/Zip') + td"
+        }
+      },
+      "extraction": "text",
+      "trim": true,
+      "target": "principalOffice",
+      "transform": {
+        "type": "javascript",
+        "code": "return {\n  address: officeAddress || 'Not Available',\n  address2: officeAddress2 || null,\n  cityStateZip: officeCityStateZip || ''\n};"
+      }
+    },
+    {
+      "id": "extract-names-list",
+      "type": "extract-table",
+      "description": "Extract all associated business names (legal, fictitious, trade)",
+      "selector": {
+        "type": "css",
+        "value": "table.names-list tbody tr, div.names-section div.name-row"
+      },
+      "columns": [
+        {
+          "name": "nameType",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(1), span.name-type"
+          },
+          "extraction": "text",
+          "trim": true
+        },
+        {
+          "name": "nameStatus",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(2), span.name-status"
+          },
+          "extraction": "text",
+          "trim": true
+        },
+        {
+          "name": "nameModified",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(3), span.name-modified"
+          },
+          "extraction": "text",
+          "trim": true,
+          "optional": true
+        },
+        {
+          "name": "nameText",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(4), span.name-text"
+          },
+          "extraction": "text",
+          "trim": true
+        }
+      ],
+      "rowTransform": {
+        "type": "javascript",
+        "code": "return {\n  type: nameType || 'Unknown',\n  status: nameStatus || 'Active',\n  modified: (nameModified || 'No').toLowerCase() === 'yes',\n  name: nameText || ''\n};"
+      },
+      "target": "names",
+      "fallback": []
+    },
+    {
+      "id": "add-certificate-note",
+      "type": "set-value",
+      "description": "Add certificate paywall note",
+      "target": "certificateNote",
+      "value": "Certificate of Existence available via Iowa SOS website (paywall - not available via this API)"
+    },
+    {
+      "id": "assemble-detail-response",
+      "type": "assemble-object",
+      "description": "Assemble complete entity detail response",
+      "target": "detailObject",
+      "fields": {
+        "identifier": "{{identifier}}",
+        "legalName": "{{legalName}}",
+        "status": "{{status}}",
+        "entityType": "{{entityType}}",
+        "stateOfIncorporation": "{{stateOfIncorporation}}",
+        "modified": "{{modified}}",
+        "expirationDate": "{{expirationDate}}",
+        "effectiveDate": "{{effectiveDate}}",
+        "filingDate": "{{filingDate}}",
+        "chapterCode": "{{chapterCode}}",
+        "names": "{{names}}",
+        "registeredAgent": "{{registeredAgent}}",
+        "principalOffice": "{{principalOffice}}",
+        "certificateNote": "{{certificateNote}}",
+        "state": "IA"
+      }
+    }
+  ],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "correlationId": {
+        "type": "string",
+        "description": "Trace ID from request"
+      },
+      "definition": {
+        "type": "string",
+        "enum": ["us-ia-entity-details"],
+        "description": "Script definition name"
+      },
+      "data": {
+        "$ref": "file:///contracts/entity-details.schema.json"
+      },
+      "state": {
+        "type": "string",
+        "enum": ["IA"],
+        "description": "State code"
+      },
+      "executionTimeMs": {
+        "type": "integer",
+        "description": "Total execution time in milliseconds"
+      },
+      "diagnosticsUrl": {
+        "type": "string",
+        "nullable": true,
+        "description": "URL to Azure Blob Storage diagnostics artifacts"
+      }
+    },
+    "required": ["correlationId", "definition", "data", "state", "executionTimeMs"],
+    "additionalProperties": false
+  },
+  "errorHandling": {
+    "strategies": [
+      {
+        "errorPattern": "entity not found|no matching|404",
+        "statusCode": 404,
+        "description": "Entity not found on Iowa SOS website"
+      },
+      {
+        "errorPattern": "expired|dissolved|merged",
+        "statusCode": 200,
+        "response": {
+          "status": "Dissolved or Merged"
+        },
+        "description": "Entity exists but is no longer active"
+      },
+      {
+        "errorPattern": "site down|connection refused|timeout",
+        "statusCode": 503,
+        "description": "Iowa SOS website temporarily unavailable"
+      }
+    ]
+  },
+  "concurrency": {
+    "state": "IA",
+    "maxConcurrentRequests": 1,
+    "description": "Detail operations share per-state concurrency control with search"
+  },
+  "notes": [
+    "Drill-down URL is read from decoded uniqueKey, not reconstructed",
+    "Some fields are optional depending on entity state and type",
+    "Names table may contain multiple entries; all are extracted",
+    "Certificate information is documentation-only (paywall-protected); not fetched",
+    "Modified flag indicates entity has been amended or updated since filing",
+    "TLS certificate validation is disabled in local Playwright mode for development"
+  ]
+}

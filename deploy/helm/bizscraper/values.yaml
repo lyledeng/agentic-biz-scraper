@@ -1,0 +1,90 @@
+image:
+  repository: devacr.azurecr.io/bizscraper
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8443
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+
+probes:
+  liveness:
+    path: /healthz
+  readiness:
+    path: /ready
+
+env:
+  ASPNETCORE_ENVIRONMENT: Production
+
+cors:
+  testUiOrigin: ""
+
+diagnostics:
+  cloudStorage:
+    enabled: "false"
+    containerName: "diagnostics"
+
+playwright:
+  browserEndpoint: ""
+
+windowsProxy:
+  endpointUrl: ""
+  timeoutSeconds: "180"
+
+fabAgent:
+  captchaSolver:
+    endpointUrl: ""
+
+fabDocumentTranslator:
+  endpointUrl: ""
+  timeoutSeconds: "30"
+
+pathBase: /mvpoc/bizscraper-api
+
+azureAd:
+  instance: "https://login.microsoftonline.com/"
+  tenantId: ""
+  clientId: ""
+  audience: ""
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+  host: ""
+  path: /mvpoc/bizscraper-api(/|$)(.*)
+  tlsSecretName: ingress-tls-cert-secret
+
+sqlite:
+  storageClassName: managed-csi
+  storageSize: 1Gi
+
+liquibase:
+  image:
+    repository: devacr.azurecr.io/bizscraper-liquibase
+    tag: latest
+    pullPolicy: IfNotPresent
+
+otel:
+  enabled: false
+  endpoint: ""

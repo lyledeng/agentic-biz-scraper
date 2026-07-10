@@ -1,0 +1,358 @@
+{
+  "$schema": "http://localhost:3000/schemas/script-definition-v2.json",
+  "metadata": {
+    "name": "us-ia-business-search",
+    "state": "IA",
+    "action": "business-search",
+    "description": "Iowa Secretary of State business entity search. Search by business name, retrieve paginated results with status, entity type, and drill-down references.",
+    "version": "1.0",
+    "audience": "v2-api-consumers",
+    "maintainer": "BizScraper.Api",
+    "lastUpdated": "2026-04-01",
+    "baseurl": "https://sos.iowa.gov/search/business/Search.aspx"
+  },
+  "variables": {
+    "searchTerm": {
+      "type": "string",
+      "required": true,
+      "description": "Business name to search (e.g., 'Acme Inc')",
+      "validation": {
+        "minLength": 2,
+        "maxLength": 100
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    }
+  },
+  "actions": [
+    {
+      "id": "navigate-search-page",
+      "type": "navigate",
+      "description": "Load Iowa SOS business search page",
+      "url": "https://sos.iowa.gov/search/business/Search.aspx",
+      "timeout": 10000,
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-for-search-form",
+      "type": "wait-for-selector",
+      "description": "Ensure search form is rendered",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "input#BusinessName",
+          "timeout": 5000
+        },
+        {
+          "type": "role",
+          "value": "textbox",
+          "name": "Business Name",
+          "timeout": 5000
+        }
+      ],
+      "errorHandling": "throw"
+    },
+    {
+      "id": "fill-search-term",
+      "type": "fill",
+      "description": "Enter business name into search field",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "input#BusinessName",
+          "confidence": 0.95
+        },
+        {
+          "type": "xpath",
+          "value": "//input[@id='BusinessName']",
+          "confidence": 0.85
+        }
+      ],
+      "value": "{{searchTerm}}",
+      "errorHandling": "throw"
+    },
+    {
+      "id": "submit-search",
+      "type": "click",
+      "description": "Click Search button",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "button#btnSearch",
+          "confidence": 0.95
+        },
+        {
+          "type": "role",
+          "value": "button",
+          "name": "Search",
+          "confidence": 0.85
+        }
+      ],
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-for-results-or-no-results",
+      "type": "wait-for-selector",
+      "description": "Wait for either results table or no-results message",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "table#gridSearchResults",
+          "timeout": 15000,
+          "optional": false
+        }
+      ],
+      "errorHandling": "continue"
+    },
+    {
+      "id": "check-no-results-message",
+      "type": "check-text",
+      "description": "Detect if search yielded no results",
+      "text": "no results|No results found|no matches",
+      "selector": {
+        "type": "css",
+        "value": "div.alert, p.NoResults, span.no-results"
+      },
+      "onMatch": {
+        "extractionMode": "empty-array",
+        "stopPagination": true,
+        "metadata": {
+          "queryYieldedZeroResults": true
+        }
+      },
+      "onNoMatch": {
+        "continueExtraction": true
+      }
+    },
+    {
+      "id": "extract-results-table",
+      "type": "extract-table",
+      "description": "Extract all rows from results table",
+      "selector": {
+        "type": "css",
+        "value": "table#gridSearchResults tbody tr"
+      },
+      "columns": [
+        {
+          "name": "identifier",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(1)"
+          },
+          "extraction": "text",
+          "trim": true
+        },
+        {
+          "name": "name",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(2) a"
+          },
+          "extraction": "text",
+          "trim": true
+        },
+        {
+          "name": "status",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(3)"
+          },
+          "extraction": "text",
+          "trim": true
+        },
+        {
+          "name": "entityType",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(4)"
+          },
+          "extraction": "text",
+          "trim": true
+        },
+        {
+          "name": "legalName",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(5)"
+          },
+          "extraction": "text",
+          "trim": true,
+          "optional": true
+        },
+        {
+          "name": "drillDownUrl",
+          "selector": {
+            "type": "css",
+            "value": "td:nth-child(2) a"
+          },
+          "extraction": "href",
+          "optional": false,
+          "description": "URL for entity detail drill-down"
+        }
+      ],
+      "rowTransform": {
+        "type": "javascript",
+        "code": "return {\n  identifier: row.identifier,\n  name: row.name,\n  status: row.status,\n  entityType: row.entityType,\n  legalName: row.legalName || null,\n  uniqueKey: Buffer.from(JSON.stringify({state: 'IA', businessNumber: row.identifier, url: row.drillDownUrl})).toString('base64url'),\n  state: 'IA',\n  formationDate: null,\n  searchResultType: row.legalName ? 'legal-name' : 'fictitious-name'\n};"
+      },
+      "errorHandling": "continue"
+    },
+    {
+      "id": "check-pagination-next",
+      "type": "check-selector",
+      "description": "Check if next page link exists and is enabled",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "a.next-page:not(.disabled)",
+          "confidence": 0.9
+        },
+        {
+          "type": "xpath",
+          "value": "//a[@class='next-page' and not(@disabled)]",
+          "confidence": 0.8
+        }
+      ],
+      "onMatch": {
+        "action": "continue-pagination"
+      },
+      "onNoMatch": {
+        "action": "stop-pagination"
+      }
+    },
+    {
+      "id": "click-next-page",
+      "type": "click",
+      "description": "Click next page button for pagination",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "a.next-page",
+          "confidence": 0.9
+        }
+      ],
+      "skipIfNotFound": true,
+      "timeout": 2000
+    },
+    {
+      "id": "wait-page-load",
+      "type": "wait-for-selector",
+      "description": "Wait for next page table to load",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "table#gridSearchResults",
+          "timeout": 10000
+        }
+      ],
+      "errorHandling": "throw"
+    },
+    {
+      "id": "loop-back-to-extract",
+      "type": "goto-action",
+      "description": "Loop back to extract next page",
+      "target": "extract-results-table",
+      "condition": {
+        "checkAgainst": "check-pagination-next",
+        "maxIterations": 50
+      }
+    }
+  ],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "correlationId": {
+        "type": "string",
+        "description": "Trace ID from request"
+      },
+      "definition": {
+        "type": "string",
+        "enum": ["us-ia-business-search"],
+        "description": "Script definition name"
+      },
+      "data": {
+        "type": "array",
+        "description": "Array of business entity results",
+        "items": {
+          "$ref": "file:///contracts/business-search-result.schema.json"
+        }
+      },
+      "totalCount": {
+        "type": "integer",
+        "description": "Number of results in this response"
+      },
+      "siteTotalCount": {
+        "type": "integer",
+        "description": "Total entities on site matching query"
+      },
+      "truncated": {
+        "type": "boolean",
+        "description": "Whether results were truncated due to pagination limit"
+      },
+      "pagesScraped": {
+        "type": "integer",
+        "description": "Number of pages scraped"
+      },
+      "searchTerm": {
+        "type": "string",
+        "description": "Original search term"
+      },
+      "state": {
+        "type": "string",
+        "enum": ["IA"],
+        "description": "State code"
+      },
+      "executionTimeMs": {
+        "type": "integer",
+        "description": "Total execution time in milliseconds"
+      },
+      "diagnosticsUrl": {
+        "type": "string",
+        "nullable": true,
+        "description": "URL to Azure Blob Storage diagnostics artifacts"
+      }
+    },
+    "required": ["correlationId", "definition", "data", "totalCount", "state", "executionTimeMs"],
+    "additionalProperties": false
+  },
+  "errorHandling": {
+    "strategies": [
+      {
+        "errorPattern": "no results found",
+        "statusCode": 200,
+        "response": {
+          "data": [],
+          "totalCount": 0,
+          "truncated": false,
+          "pagesScraped": 1
+        }
+      },
+      {
+        "errorPattern": "site down|connection refused|timeout",
+        "statusCode": 503,
+        "description": "Iowa SOS website temporarily unavailable"
+      },
+      {
+        "errorPattern": "captcha|javascript required|robot",
+        "statusCode": 429,
+        "description": "Rate limiting or security challenge. Retry with backoff."
+      }
+    ]
+  },
+  "concurrency": {
+    "state": "IA",
+    "maxConcurrentRequests": 1,
+    "rateLimitPerMinute": 10,
+    "description": "Iowa SOS enforces per-state concurrency controls to prevent overload"
+  },
+  "notes": [
+    "Search is case-insensitive; partial name matches supported",
+    "Results sorted by business number (identifier) ascending",
+    "Pagination limit: typically 20-50 results per page (varies with SOS)",
+    "Drill-down URLs are unique per session; encoded in uniqueKey for later retrieval",
+    "No filtering available; partial matches include all containing string",
+    "TLS certificate validation is disabled in local Playwright mode for development"
+  ]
+}

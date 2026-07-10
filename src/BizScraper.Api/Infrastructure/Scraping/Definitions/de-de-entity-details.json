@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "f3a2c891-4b67-4e8d-a9c1-7d5e3f2a1b0c",
+    "definitionSlug": "de-de-entity-details",
+    "name": "Germany Entity Details (Hardcopy Document)",
+    "description": "Navigate Handelsregister, locate entity by registration ID, download AD (Aktuelle Drucke) PDF",
+    "state": "DE",
+    "endpoint": "entity-details"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "registrationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://www.handelsregister.de/rp_web/normalesuche/welcome.xhtml"
+    },
+    {
+      "name": "entityInfo",
+      "source": "extracted"
+    },
+    {
+      "name": "originalDocumentUrl",
+      "source": "extracted"
+    }
+  ],
+  "environment": {
+    "acceptDownloads": true,
+    "selectorTimeoutMs": 10000
+  },
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Handelsregister search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "01-de-details-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "extract",
+      "description": "Dismiss cookie consent if present",
+      "javascript": "() => { const btn = document.querySelector('button.ui-cookie-consent-btn, .cc-btn.cc-dismiss, button[aria-label=\"Okay\"], a.cc-btn'); if (btn) { btn.click(); return 'dismissed'; } return 'none'; }",
+      "storeAs": "__cookieConsent"
+    },
+    {
+      "id": "action-001b",
+      "order": 1,
+      "type": "extract",
+      "description": "Truncate searchTerm to max 5 words (Handelsregister keyword limit)",
+      "javascript": "() => { const term = '${searchTerm}'; const words = term.split(/\\s+/); return words.length > 5 ? words.slice(0, 5).join(' ') : term; }",
+      "storeAs": "searchTerm"
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "fill",
+      "description": "Enter company name into keyword search (max 5 words)",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "textarea[name='form:schlagwoerter'], #form\\:schlagwoerter",
+            "confidence": 1
+          }
+        ]
+      },
+      "value": "${searchTerm}"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "click",
+      "description": "Submit search",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "button[name='form:btnSuche'], #form\\:btnSuche",
+            "confidence": 1
+          }
+        ]
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "02-de-details-search-results"
+      }
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "extract",
+      "description": "Find matching entity row by registrationId, extract entity info, and mark AD link for download",
+      "javascript": "() => { const regId = '${registrationId}'.replace(/\\s+/g, ' ').trim(); const tables = document.querySelectorAll('table.ui-panelgrid.ui-widget'); for (const table of tables) { const bold = table.querySelector('span.fontWeightBold'); if (!bold) continue; const text = bold.textContent.replace(/\\s+/g, ' ').trim(); if (!text.includes(regId)) continue; const oddRow = table.querySelector('tr.ui-panelgrid-odd, tr.ui-widget-content:nth-child(2)'); if (!oddRow) continue; const nameCell = oddRow.querySelector('td.paddingBottom20Px'); const officeCell = oddRow.querySelector('td.sitzSuchErgebnisse'); const cells = oddRow.querySelectorAll('td'); const name = nameCell ? nameCell.textContent.replace(/\\s+/g, ' ').trim() : ''; const registeredOffice = officeCell ? officeCell.textContent.replace(/\\s+/g, ' ').trim() : ''; let status = ''; for (let i = 0; i < cells.length; i++) { if (cells[i].classList.contains('sitzSuchErgebnisse') && i + 1 < cells.length) { status = cells[i + 1].textContent.replace(/\\s+/g, ' ').trim(); break; } } const adLinks = table.querySelectorAll('a'); let adFound = false; for (const a of adLinks) { if (a.textContent.replace(/\\s+/g, ' ').trim() === 'AD') { a.setAttribute('data-bizscraper-ad-target', 'true'); adFound = true; break; } } return JSON.stringify({ name, identifier: text, status, registeredOffice, adFound }); } return null; }",
+      "storeAs": "entityInfo",
+      "screenshot": {
+        "milestone": "03-de-details-matched-row"
+      }
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "extract",
+      "description": "Fail if no matching entity found",
+      "javascript": "() => { throw new Error('No matching entity found for the given registration ID'); }",
+      "condition": {
+        "type": "variable-falsy",
+        "variableName": "entityInfo"
+      }
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "download",
+      "description": "Download AD (Aktuelle Drucke) PDF from the matched entity row (skipped if no AD link)",
+      "linkSelector": "[data-bizscraper-ad-target='true']",
+      "validateExtension": ".pdf",
+      "filenamePattern": "de-hardcopy-${correlationId}-original.pdf",
+      "storeAs": "originalDocumentUrl",
+      "condition": {
+        "type": "element-exists",
+        "selector": "[data-bizscraper-ad-target='true']"
+      },
+      "screenshot": {
+        "milestone": "04-de-details-ad-downloaded"
+      }
+    }
+  ],
+  "output": {
+    "variableName": "entityInfo",
+    "type": "DeEntityDetailRaw",
+    "compose": {
+      "entityInfo": "entityInfo",
+      "originalDocumentUrl": "originalDocumentUrl"
+    }
+  }
+}

@@ -1,0 +1,149 @@
+# OpenAPI Contract: PDF Proxy Streaming Endpoint
+
+**Feature**: 011-pdf-proxy-streaming
+**Date**: 2026-03-26
+
+```yaml
+openapi: "3.0.3"
+info:
+  title: BizScraper API — Document Proxy
+  version: 1.0.2603.0
+
+paths:
+  /api/v1/documents/{blobPath}:
+    get:
+      operationId: StreamDocument
+      summary: Stream a PDF document from storage
+      description: >
+        Streams a stored PDF file (certificate of good standing, history document)
+        from Azure Blob Storage through the API, eliminating the need for clients
+        to have direct network access to the storage account. Supports conditional
+        requests via If-None-Match / ETag for caching.
+      tags:
+        - Documents
+      parameters:
+        - name: blobPath
+          in: path
+          required: true
+          description: >
+            The blob path within the configured storage container. Must match the
+            pattern `{correlationId}/{filename}` — exactly one directory separator,
+            alphanumeric/dash/dot/underscore characters only. Max 1024 characters.
+          schema:
+            type: string
+            pattern: "^[a-zA-Z0-9\\-]+/[a-zA-Z0-9\\-_.]+$"
+            maxLength: 1024
+          example: "abc123-def456/20051063025-certificateofgoodstanding.pdf"
+        - name: download
+          in: query
+          required: false
+          description: >
+            When set to `true`, forces the browser to download the file instead
+            of displaying it inline. Sets Content-Disposition to `attachment`.
+          schema:
+            type: boolean
+            default: false
+        - name: If-None-Match
+          in: header
+          required: false
+          description: >
+            ETag from a previous response. If the blob's current ETag matches,
+            the server returns 304 Not Modified without re-streaming content.
+          schema:
+            type: string
+          example: '"0x8D1234567890ABC"'
+      responses:
+        "200":
+          description: Blob content streamed successfully
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=86400, immutable"
+            ETag:
+              schema:
+                type: string
+              example: '"0x8D1234567890ABC"'
+            Content-Disposition:
+              schema:
+                type: string
+              example: 'inline; filename="20051063025-certificateofgoodstanding.pdf"'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: >
+            Not Modified — the client's cached version is current.
+            No body is returned.
+        "400":
+          description: Invalid blob path (missing, empty, too long, or disallowed characters)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/validation-error"
+                title: "Bad Request"
+                status: 400
+                detail: "The blob path is invalid. Must match pattern {correlationId}/{filename} with alphanumeric, dash, dot, and underscore characters only."
+        "404":
+          description: Blob does not exist in the storage container
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/document-not-found"
+                title: "Not Found"
+                status: 404
+                detail: "The requested document does not exist."
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+        "502":
+          description: Storage account is unreachable after retries
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/storage-unavailable"
+                title: "Bad Gateway"
+                status: 502
+                detail: "The storage service is temporarily unavailable."
+        "504":
+          description: Blob download timed out (30-second limit exceeded)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/storage-timeout"
+                title: "Gateway Timeout"
+                status: 504
+                detail: "The storage service did not respond within 30 seconds."
+
+components:
+  schemas:
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+```

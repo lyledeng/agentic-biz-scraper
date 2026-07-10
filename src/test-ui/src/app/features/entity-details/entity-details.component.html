@@ -1,0 +1,336 @@
+<wk-icon-default-sprite-pds3></wk-icon-default-sprite-pds3>
+<div class="entity-details-page">
+  <!-- Navigation -->
+  <div class="nav-actions">
+    <button-field-pds3 type="tertiary">
+      <button type="button" (click)="onBackToResults()">← Back to Results</button>
+    </button-field-pds3>
+    <button-field-pds3 type="tertiary">
+      <button type="button" (click)="onNewSearch()">New Search</button>
+    </button-field-pds3>
+  </div>
+
+  <app-loading-indicator [loading]="loading()"></app-loading-indicator>
+  <app-error-banner [errorMessage]="error()"></app-error-banner>
+
+  @if (detail(); as d) {
+    <h1 class="entity-name">{{ d.details.name }}</h1>
+    <div class="status-badge">{{ d.details.status }}</div>
+
+    <div class="details-content">
+
+        <!-- Entity Details -->
+        <card-pds3 flowClass="detail-card">
+          <div class="card-content">
+            <h3 class="card-heading">Entity Details</h3>
+            <dl class="detail-grid">
+              <dt>Name</dt>
+              <dd>{{ d.details.name }}</dd>
+
+              <dt>Status</dt>
+              <dd>{{ d.details.status }}</dd>
+
+              <dt>Identifier</dt>
+              <dd>{{ d.details.identifier }}</dd>
+
+              @if (d.details.formationDate) {
+                <dt>Formation Date</dt>
+                <dd>{{ d.details.formationDate }}</dd>
+              }
+
+              @if (d.details.entityType) {
+                <dt>Entity Type</dt>
+                <dd>{{ d.details.entityType }}</dd>
+              }
+
+              @if (d.details.jurisdiction) {
+                <dt>Jurisdiction</dt>
+                <dd>{{ d.details.jurisdiction }}</dd>
+              }
+
+              @if (d.details.principalAddress) {
+                <dt>Principal Address</dt>
+                <dd>{{ d.details.principalAddress }}</dd>
+              }
+
+              @if (d.details.mailingAddress) {
+                <dt>Mailing Address</dt>
+                <dd>{{ d.details.mailingAddress }}</dd>
+              }
+
+              @if (d.details.registeredOffice) {
+                <dt>Registered Office</dt>
+                <dd>{{ d.details.registeredOffice }}</dd>
+              }
+
+              @if (d.details.subStatus) {
+                <dt>Sub-Status</dt>
+                <dd>{{ d.details.subStatus }}</dd>
+              }
+
+              @if (d.details.standingTax) {
+                <dt>Standing (Tax)</dt>
+                <dd>{{ d.details.standingTax }}</dd>
+              }
+
+              @if (d.details.standingRA) {
+                <dt>Standing (RA)</dt>
+                <dd>{{ d.details.standingRA }}</dd>
+              }
+
+              @if (d.details.standingOther) {
+                <dt>Standing (Other)</dt>
+                <dd>{{ d.details.standingOther }}</dd>
+              }
+
+              @if (d.details.inactiveDate) {
+                <dt>Inactive Date</dt>
+                <dd>{{ d.details.inactiveDate }}</dd>
+              }
+
+              @if (d.details.termOfDuration) {
+                <dt>Term of Duration</dt>
+                <dd>{{ d.details.termOfDuration }}</dd>
+              }
+
+              @if (d.details.formedIn) {
+                <dt>Formed In</dt>
+                <dd>{{ d.details.formedIn }}</dd>
+              }
+
+              @if (d.details.periodicReportMonth) {
+                <dt>Periodic Report Month</dt>
+                <dd>{{ d.details.periodicReportMonth }}</dd>
+              }
+
+              @if (d.details.latestAnnualReportYear) {
+                <dt>Latest Annual Report Year</dt>
+                <dd>{{ d.details.latestAnnualReportYear }}</dd>
+              }
+
+              @if (d.details.annualReportExempt) {
+                <dt>Annual Report Exempt</dt>
+                <dd>{{ d.details.annualReportExempt }}</dd>
+              }
+
+              @if (d.details.licenseTaxPaid) {
+                <dt>License Tax Paid</dt>
+                <dd>{{ d.details.licenseTaxPaid }}</dd>
+              }
+
+              @if (d.details.chapterCode) {
+                <dt>Chapter/Code</dt>
+                <dd>{{ d.details.chapterCode }}</dd>
+              }
+            </dl>
+          </div>
+        </card-pds3>
+
+        <!-- Registered Agent -->
+        @if (d.registeredAgent) {
+          <card-pds3 flowClass="detail-card">
+            <div class="card-content">
+              <h3 class="card-heading">Registered Agent</h3>
+              <dl class="detail-grid">
+                @if (d.registeredAgent.name) {
+                  <dt>Name</dt>
+                  <dd>{{ d.registeredAgent.name }}</dd>
+                }
+                @if (d.registeredAgent.streetAddress) {
+                  <dt>Street Address</dt>
+                  <dd>{{ d.registeredAgent.streetAddress }}</dd>
+                }
+                @if (d.registeredAgent.mailingAddress) {
+                  <dt>Mailing Address</dt>
+                  <dd>{{ d.registeredAgent.mailingAddress }}</dd>
+                }
+              </dl>
+            </div>
+          </card-pds3>
+        }
+
+        <!-- Certificate Note (Iowa) -->
+        @if (d.details.certificateNote) {
+          <notification-pds3 type="warning" notificationRole="status">
+            <div *notificationHeadingPds3>Certificate Notice</div>
+            <span *notificationContentPds3>{{ d.details.certificateNote }}</span>
+          </notification-pds3>
+        }
+
+        <!-- Iowa Names -->
+        @if (d.details.iowaNames && d.details.iowaNames.length > 0) {
+          <card-pds3 flowClass="detail-card">
+            <div class="card-content">
+              <h3 class="card-heading">Iowa Names</h3>
+              <simple-table-pds3>
+                <table role="grid" aria-label="Iowa Names">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Modified</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (entry of d.details.iowaNames; track entry.name + entry.type) {
+                      <tr>
+                        <td>{{ entry.name }}</td>
+                        <td>{{ entry.type }}</td>
+                        <td>{{ entry.status }}</td>
+                        <td>{{ entry.modified ? 'Yes' : 'No' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </simple-table-pds3>
+            </div>
+          </card-pds3>
+        }
+
+        <wk-icon-file-pdf-sprite-pds3></wk-icon-file-pdf-sprite-pds3>
+
+        <!-- Certificate & Certified Documents -->
+        @if (d.certificate) {
+          <card-pds3 flowClass="detail-card">
+            <div class="card-content">
+              <h3 class="card-heading">Certificates &amp; Documents</h3>
+              @if (d.certificate.available && d.certificate.downloads && d.certificate.downloads.length > 0) {
+                <div class="doc-button-row">
+                  @for (dl of d.certificate.downloads; track dl.label) {
+                    @if (dl.proxyUrl) {
+                      <button-field-pds3 type="secondary" size="small">
+                        <button type="button" [class.doc-btn--active]="activeViewerKey() === 'cert-' + $index" (click)="viewDocument(dl.proxyUrl, 'cert-' + $index, dl.label || dl.fileName || 'Certificate Of Good Standing')">
+                          <icon-pds3 name="wk-icon-file-pdf"></icon-pds3>
+                          {{ dl.label || dl.fileName }}
+                        </button>
+                      </button-field-pds3>
+                    } @else if (dl.error) {
+                      <p class="error-text">{{ dl.error }}</p>
+                    }
+                  }
+                </div>
+              } @else if (d.certificate.available) {
+                <p>Certificate available on state website</p>
+              } @else if (d.certificate.error) {
+                <p class="error-text">{{ d.certificate.error }}</p>
+              } @else {
+                <p>Not available</p>
+              }
+            </div>
+          </card-pds3>
+        }
+
+        <!-- Documents -->
+        @if (d.documents && d.documents.length > 0) {
+          <card-pds3 flowClass="detail-card">
+            <div class="card-content">
+              <h3 class="card-heading">Documents</h3>
+              <simple-table-pds3>
+                <table role="grid" aria-label="Documents">
+                  <thead>
+                    <tr>
+                      <th>Title</th>
+                      <th>Date</th>
+                      <th>Downloads</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (doc of d.documents; track $index) {
+                      <tr>
+                        <td>{{ doc.title }}</td>
+                        <td>{{ doc.date ?? '—' }}</td>
+                        <td>
+                          @for (dl of doc.downloads; track dl.label) {
+                            @if (dl.proxyUrl) {
+                              <button-field-pds3 type="secondary" size="small">
+                                <button type="button" [class.doc-btn--active]="activeViewerKey() === dl.proxyUrl" (click)="viewDocument(dl.proxyUrl, dl.proxyUrl, doc.title + ' \u2014 ' + dl.label)"><icon-pds3 name="wk-icon-file-pdf"></icon-pds3> {{ dl.label }}</button>
+                              </button-field-pds3>
+                            } @else if (dl.error) {
+                              <span class="error-text">{{ dl.label }}: {{ dl.error }}</span>
+                            } @else {
+                              <span>{{ dl.label }}: unavailable</span>
+                            }
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </simple-table-pds3>
+            </div>
+          </card-pds3>
+        }
+
+        <!-- Parties -->
+        @if (d.parties && d.parties.length > 0) {
+          <card-pds3 flowClass="detail-card">
+            <div class="card-content">
+              <h3 class="card-heading">Parties</h3>
+              <simple-table-pds3>
+                <table role="grid" aria-label="Parties">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Role</th>
+                      <th>Organization</th>
+                      <th>Address</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (party of d.parties; track party.name + party.role) {
+                      <tr>
+                        <td>{{ party.name }}</td>
+                        <td>{{ party.role }}</td>
+                        <td>{{ party.organization ?? '—' }}</td>
+                        <td>{{ party.address ?? '—' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </simple-table-pds3>
+            </div>
+          </card-pds3>
+        }
+
+      </div><!-- /.details-content -->
+  }
+
+  <!-- PDF Side Modal -->
+  <side-modal-pds3
+    [isOpen]="!!activeViewerKey()"
+    position="right"
+    [srLabelledBy]="'pdf-panel-title'"
+    (userRequest)="onPanelCloseRequest()">
+    @if (activeViewerKey(); as key) {
+      @if (viewerStates().get(key); as vs) {
+        <wk-icon-close-sprite-pds3></wk-icon-close-sprite-pds3>
+        <div class="pdf-panel-header">
+          <span id="pdf-panel-title" class="pdf-panel-title">{{ activeViewerLabel() }}</span>
+          <button-field-pds3 type="icon" size="small">
+            <button type="button" (click)="closeViewer(key)" title="Close viewer">
+              <icon-pds3 name="wk-icon-close" srTitle="Close"></icon-pds3>
+            </button>
+          </button-field-pds3>
+        </div>
+        <div class="pdf-panel-body">
+          @if (vs.status === 'loading') {
+            <div class="pdf-viewer-loading">
+              <wk-icon-spinner-sprite-pds3></wk-icon-spinner-sprite-pds3>
+              <icon-pds3 name="wk-icon-spinner" [isSpin]="true" flowClass="pdf-loading-spinner"></icon-pds3>
+              <span class="pdf-loading-text">Loading document…</span>
+            </div>
+          } @else if (vs.status === 'loaded' && vs.blobUrl) {
+            <iframe [src]="getSafeBlobUrl(vs.blobUrl)" class="pdf-panel-frame" title="PDF document viewer"></iframe>
+          } @else if (vs.status === 'error') {
+            <div class="pdf-viewer-error">
+              <span class="pdf-error-icon">⚠</span>
+              <span class="pdf-error-message">{{ vs.errorMessage }}</span>
+              <button type="button" class="retry-btn" (click)="retryDocument()">↻ Retry</button>
+            </div>
+          }
+        </div>
+      }
+    }
+  </side-modal-pds3>
+</div>

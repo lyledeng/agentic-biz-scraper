@@ -1,0 +1,8 @@
+{
+  "name": "bizscraper-jumpstart",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@wk/components-v3-angular17": "^0.0.256"
+  }
+}

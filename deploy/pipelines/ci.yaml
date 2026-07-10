@@ -1,0 +1,448 @@
+name: $(Date:yy).$(Date:MMdd).$(Rev:r)
+
+trigger:
+  branches:
+    include:
+      - '*'
+    exclude:
+      - main
+  paths:
+    include:
+      - Altaf/Speckit/BizScraper/**
+
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: vg-artifactory.wolterskluwer.io
+  - name: projectDirectory
+    value: $(Build.SourcesDirectory)/Altaf/Speckit/BizScraper
+  - name: imageTag
+    value: $(Build.BuildNumber)
+  - name: apiImageRepository
+    value: bizscraper
+  - name: uiImageRepository
+    value: bizscraper-ui
+  - name: liquibaseImageRepository
+    value: bizscraper-liquibase
+  - name: DOTNET_CLI_TELEMETRY_OPTOUT
+    value: 1
+  - name: containerRegistryServiceConnection
+    ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+      value: 'Azure Container Registry (Staging)-iLienMVP'
+    ${{ else }}:
+      value: 'Azure Container Registry (Assembly)-iLienMVP'
+
+stages:
+  - stage: Validation
+    displayName: Validation
+    jobs:
+      - job: Validate
+        displayName: Build, Test & Lint
+        steps:
+          # ── SDK setup ────────────────────────────────────────────
+          - task: UseDotNet@2
+            inputs:
+              packageType: sdk
+              version: 10.0.x
+
+          - task: UseNode@1
+            inputs:
+              version: '22.x'
+            displayName: Use Node.js 22
+
+          - task: HelmInstaller@1
+            inputs:
+              helmVersionToInstall: 'latest'
+            displayName: Install Helm 3
+
+          # ── .NET API ─────────────────────────────────────────────
+          - script: dotnet restore BizScraper.slnx
+            workingDirectory: $(projectDirectory)
+            displayName: 'API: Restore'
+
+          - script: dotnet build BizScraper.slnx --configuration Release --no-restore -warnaserror
+            workingDirectory: $(projectDirectory)
+            displayName: 'API: Build'
+
+          - script: |
+              dotnet test BizScraper.slnx \
+                --configuration Release \
+                --no-build \
+                --collect:"XPlat Code Coverage" \
+                --results-directory $(Agent.TempDirectory)/coverage
+            workingDirectory: $(projectDirectory)
+            displayName: 'API: Test + Coverage'
+
+          - script: |
+              dotnet tool install --global dotnet-reportgenerator-globaltool 2>/dev/null || true
+              reportgenerator \
+                -reports:$(Agent.TempDirectory)/coverage/**/coverage.cobertura.xml \
+                -targetdir:$(Agent.TempDirectory)/coverage/report \
+                -reporttypes:"HtmlInline_AzurePipelines;Cobertura"
+            displayName: 'API: Generate Coverage Report'
+
+          - task: PublishCodeCoverageResults@2
+            inputs:
+              summaryFileLocation: $(Agent.TempDirectory)/coverage/report/Cobertura.xml
+            displayName: 'API: Publish Coverage'
+
+          # ── Angular UI ───────────────────────────────────────────
+          - script: |
+              set -euo pipefail
+              if [ -n "${NPM_TOKEN:-}" ]; then
+                echo "registry=https://artifactory.wolterskluwer.io/artifactory/api/npm/group-npm/" > ~/.npmrc
+                echo "//artifactory.wolterskluwer.io/artifactory/api/npm/group-npm/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+              fi
+            displayName: 'UI: Configure npm auth'
+            env:
+              NPM_TOKEN: $(NPM_TOKEN)
+
+          - script: npm ci
+            workingDirectory: $(projectDirectory)/src/test-ui
+            displayName: 'UI: npm install'
+
+          - script: npx ng build --configuration production
+            workingDirectory: $(projectDirectory)/src/test-ui
+            displayName: 'UI: Build'
+
+          - script: npx ng test --watch=false --browsers=ChromeHeadless --code-coverage
+            workingDirectory: $(projectDirectory)/src/test-ui
+            displayName: 'UI: Test + Coverage'
+
+          - script: rm -f ~/.npmrc
+            displayName: 'UI: Cleanup npm auth'
+            condition: always()
+
+          # ── Helm Lint ────────────────────────────────────────────
+          - script: |
+              SEMVER=$(echo "$(Build.BuildNumber)" | sed -E 's/\.0+([0-9])/.\1/g')
+              echo "Build number: $(Build.BuildNumber) → SemVer: $SEMVER"
+              for chart in bizscraper bizscraper-ui; do
+                sed -i "s/^version:.*/version: $SEMVER/" $(projectDirectory)/deploy/helm/$chart/Chart.yaml
+                sed -i "s/^appVersion:.*/appVersion: \"$(Build.BuildNumber)\"/" $(projectDirectory)/deploy/helm/$chart/Chart.yaml
+              done
+            displayName: 'Helm: Stamp chart versions with build number'
+
+          - script: helm lint $(projectDirectory)/deploy/helm/bizscraper --strict
+            displayName: 'Helm: Lint bizscraper'
+
+          - script: helm lint $(projectDirectory)/deploy/helm/bizscraper-ui --strict
+            displayName: 'Helm: Lint bizscraper-ui'
+
+          # ── Liquibase Validate ───────────────────────────────────
+          - script: docker build -f deploy/liquibase/liquibase_dockerfile -t cososwebscraping-liquibase:latest .
+            workingDirectory: $(projectDirectory)
+            displayName: 'Liquibase: Build image'
+
+          - script: |
+              docker run --rm cososwebscraping-liquibase:latest \
+                --url='offline:sqlite' \
+                validate
+            displayName: 'Liquibase: Validate changelog'
+
+          # ── Documentation ────────────────────────────────────────
+          - pwsh: ./tools/ci/check-xml-doc-coverage.ps1
+            workingDirectory: $(projectDirectory)
+            displayName: 'Docs: XML doc-comment coverage'
+
+          - pwsh: ./tools/ci/check-liquibase-comments.ps1
+            workingDirectory: $(projectDirectory)
+            displayName: 'Docs: Liquibase changeset comments'
+
+          - pwsh: ./tools/ci/check-global-snapshot.ps1
+            workingDirectory: $(projectDirectory)
+            displayName: 'Docs: Global spec snapshot'
+
+  - stage: ImageBuildAndPush
+    displayName: Image Build and Push
+    dependsOn: Validation
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), ne(variables['Build.SourceBranchName'], 'main'))
+    jobs:
+      - job: BuildAndPushAPI
+        displayName: Build and Push API Image
+        steps:
+          - script: |
+              echo "Selected ACR service connection: $(containerRegistryServiceConnection)"
+            displayName: Log resolved container registry service connection
+
+          - task: Docker@2
+            displayName: Build and push API image
+            inputs:
+              command: buildAndPush
+              repository: $(apiImageRepository)
+              dockerfile: $(projectDirectory)/src/bizscraper-dockerfile
+              buildContext: $(projectDirectory)
+              containerRegistry: $(containerRegistryServiceConnection)
+              tags: |
+                $(imageTag)
+
+      - job: BuildAndPushUI
+        displayName: Build and Push UI Image
+        steps:
+          - task: Docker@2
+            displayName: Build UI image
+            inputs:
+              command: build
+              repository: $(uiImageRepository)
+              dockerfile: $(projectDirectory)/src/bizscraper-ui-dockerfile
+              buildContext: $(projectDirectory)
+              containerRegistry: $(containerRegistryServiceConnection)
+              arguments: --build-arg BASE_HREF=/mvpoc/bizscraper-ui/ --build-arg API_BASE_URL=/mvpoc/bizscraper-api --build-arg NPM_TOKEN=$(NPM_TOKEN) --build-arg MSAL_CLIENT_ID=$(MSAL_CLIENT_ID) --build-arg MSAL_AUTHORITY=$(MSAL_AUTHORITY) --build-arg MSAL_REDIRECT_URI=$(MSAL_REDIRECT_URI) --build-arg MSAL_POST_LOGOUT_REDIRECT_URI=$(MSAL_POST_LOGOUT_REDIRECT_URI) --build-arg MSAL_SCOPES=$(MSAL_SCOPES)
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Push UI image
+            inputs:
+              command: push
+              repository: $(uiImageRepository)
+              containerRegistry: $(containerRegistryServiceConnection)
+              tags: |
+                $(imageTag)
+
+      - job: BuildAndPushLiquibase
+        displayName: Build and Push Liquibase Image
+        steps:
+          - task: Docker@2
+            displayName: Build and push Liquibase image
+            inputs:
+              command: buildAndPush
+              repository: $(liquibaseImageRepository)
+              dockerfile: $(projectDirectory)/deploy/liquibase/liquibase_dockerfile
+              buildContext: $(projectDirectory)
+              containerRegistry: $(containerRegistryServiceConnection)
+              tags: |
+                $(imageTag)
+
+  - stage: DeployToAssembly
+    displayName: Deploy To Assembly
+    dependsOn: ImageBuildAndPush
+    condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
+    variables:
+      acr: zuscud003b070acrd1ils.azurecr.io
+      k8sNamespace: mvpoc
+      ingressTlsHost: devcaas-az.ilienonline.com
+      ingressTlsSecret: ingress-tls-cert-secret
+    jobs:
+      - job: DeployAPI
+        displayName: Deploy API (Helm)
+        steps:
+          - task: HelmInstaller@1
+            inputs:
+              helmVersionToInstall: 'latest'
+            displayName: Install Helm
+
+          - task: Kubernetes@1
+            displayName: 'Ensure SQLite PVC exists'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: 'd003-b070-iliensuite-z-dev-006-iLienMVP'
+              namespace: $(k8sNamespace)
+              command: apply
+              arguments: '-f $(projectDirectory)/deploy/helm/bizscraper/pvc-standalone.yaml'
+
+          - task: HelmDeploy@0
+            displayName: 'Helm upgrade bizscraper'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: 'd003-b070-iliensuite-z-dev-006-iLienMVP'
+              namespace: $(k8sNamespace)
+              command: upgrade
+              chartType: FilePath
+              chartPath: $(projectDirectory)/deploy/helm/bizscraper
+              releaseName: bizscraper
+              install: true
+              valueFile: $(projectDirectory)/deploy/helm/bizscraper/values-assembly.yaml
+              overrideValues: 'image.repository=$(acr)/$(apiImageRepository),image.tag=$(imageTag),liquibase.image.repository=$(acr)/$(liquibaseImageRepository),liquibase.image.tag=$(imageTag)'
+              arguments: '--wait --timeout 5m0s'
+
+          - task: Kubernetes@1
+            displayName: 'Copy SQLite DB from AKS pod'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: 'd003-b070-iliensuite-z-dev-006-iLienMVP'
+              namespace: $(k8sNamespace)
+              command: 'login'
+
+          - script: |
+              set -euo pipefail
+              POD=$(kubectl get pod -n $(k8sNamespace) -l app=bizscraper -o jsonpath='{.items[0].metadata.name}')
+              echo "Copying SQLite DB from pod $POD"
+              kubectl cp $(k8sNamespace)/$POD:/data/bizscraper.db $(Build.ArtifactStagingDirectory)/bizscraper.db
+              ls -la $(Build.ArtifactStagingDirectory)/bizscraper.db
+            displayName: 'kubectl cp SQLite DB'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish SQLite DB artifact'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/bizscraper.db'
+              artifact: 'bizscraper-sqlite-db'
+
+      - job: DeployUI
+        displayName: Deploy UI (Helm)
+        steps:
+          - task: HelmInstaller@1
+            inputs:
+              helmVersionToInstall: 'latest'
+            displayName: Install Helm
+
+          - task: HelmDeploy@0
+            displayName: 'Helm upgrade bizscraper-ui'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceEndpoint: 'd003-b070-iliensuite-z-dev-006-iLienMVP'
+              namespace: $(k8sNamespace)
+              command: upgrade
+              chartType: FilePath
+              chartPath: $(projectDirectory)/deploy/helm/bizscraper-ui
+              releaseName: bizscraper-ui
+              install: true
+              overrideValues: 'image.repository=$(acr)/$(uiImageRepository),image.tag=$(imageTag)'
+              arguments: '--wait --timeout 5m0s'
+
+  # -------------------------------------------------------------------------
+  # Stage: Publish IIS Artifact (win-x64)
+  # -------------------------------------------------------------------------
+  - stage: IIS
+    displayName: 'Publish IIS Artifact'
+    dependsOn: Validation
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), ne(variables['Build.SourceBranchName'], 'main'))
+    jobs:
+      - job: PublishIIS
+        displayName: 'Publish IIS (win-x64)'
+        steps:
+          # ------ SDK -------------------------------------------------------
+          - task: UseDotNet@2
+            displayName: 'Install .NET 10 SDK'
+            inputs:
+              packageType: 'sdk'
+              version: '10.0.x'
+
+          # ------ Publish ---------------------------------------------------
+          - task: DotNetCoreCLI@2
+            displayName: 'Publish for IIS (win-x64)'
+            inputs:
+              command: 'publish'
+              publishWebProjects: false
+              projects: '$(projectDirectory)/src/BizScraper.Api/BizScraper.Api.csproj'
+              zipAfterPublish: false
+              modifyOutputPath: false
+              arguments: >-
+                --configuration Release
+                -r win-x64
+                --self-contained false
+                -o $(Build.ArtifactStagingDirectory)/win-publish
+
+          # ------ Archive artifact for manual download ---------------------
+          - task: ArchiveFiles@2
+            displayName: 'Zip IIS artifact'
+            inputs:
+              rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/win-publish'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/bizscraper-win-x64.zip'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish IIS binaries artifact'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/win-publish'
+              artifact: 'bizscraper-iis'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish CD scripts artifact'
+            inputs:
+              targetPath: '$(projectDirectory)/tools/cd'
+              artifact: 'bizscraper-cd-scripts'
+
+  # -------------------------------------------------------------------------
+  # Stage: Deploy to Assembly (Windows VM via IIS)
+  # -------------------------------------------------------------------------
+  - stage: DeployToAssemblyIIS
+    displayName: 'Deploy to Assembly (Windows VM)'
+    dependsOn:
+      - IIS
+      - DeployToAssembly
+    condition: and(succeeded(), ne(variables['Build.SourceBranchName'], 'main'))
+    variables:
+      iisArtifactName: bizscraper-iis
+      cdScriptsArtifactName: bizscraper-cd-scripts
+      expectedAppDll: BizScraper.Api.dll
+      iisWebsiteName: Default Web Site
+      iisApplicationPath: /mvpoc/bizscraper-api
+      iisAppPoolName: BizScraperApiAppPool
+      iisPhysicalPath: 'D:\apps\bizscraper-api'
+      sqliteDbPath: 'D:\data\bizscraper.db'
+      healthCheckUrl: https://localhost/mvpoc/bizscraper-api/ready
+      dotnetRuntimeVersionPrefix: '10.0'
+      artifactDownloadPath: '$(Pipeline.Workspace)\bizscraper-iis'
+    jobs:
+      - deployment: DeployWindowsVM
+        displayName: 'Deploy IIS package to Windows VM'
+        environment:
+          name: 'Assembly'
+          resourceType: virtualMachine
+          tags: aegis.ilienonline.com
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Disable implicit artifact download; fetch into a cleaned path.
+                - download: none
+
+                - download: current
+                  artifact: '$(cdScriptsArtifactName)'
+                  displayName: 'Download CD scripts artifact'
+
+                - powershell: |
+                    $ErrorActionPreference = 'Stop'
+                    & "$(Pipeline.Workspace)\$(cdScriptsArtifactName)\prepare-artifact-path.ps1" `
+                      -ArtifactDownloadPath '$(artifactDownloadPath)'
+                  displayName: 'Prepare clean artifact download path'
+
+                - download: current
+                  artifact: '$(iisArtifactName)'
+                  displayName: 'Download IIS deployment artifact'
+
+                - powershell: |
+                    $ErrorActionPreference = 'Stop'
+                    & "$(Pipeline.Workspace)\$(cdScriptsArtifactName)\validate-dotnet-hosting-runtime.ps1" `
+                      -RequiredVersionPrefix '$(dotnetRuntimeVersionPrefix)'
+                  displayName: 'Validate IIS .NET hosting runtime'
+
+                - powershell: |
+                    $ErrorActionPreference = 'Stop'
+                    & "$(Pipeline.Workspace)\$(cdScriptsArtifactName)\deploy-iis-artifact.ps1" `
+                      -ArtifactRoot '$(artifactDownloadPath)' `
+                      -ExpectedAppDll '$(expectedAppDll)' `
+                      -IisWebsiteName '$(iisWebsiteName)' `
+                      -IisApplicationPath '$(iisApplicationPath)' `
+                      -IisAppPoolName '$(iisAppPoolName)' `
+                      -IisPhysicalPath '$(iisPhysicalPath)' `
+                      -CloudStorageConnectionString '$(ado-pr-code-reviewer-storage-api-key)'
+                  displayName: 'Deploy IIS artifact'
+
+                - download: current
+                  artifact: 'bizscraper-sqlite-db'
+                  displayName: 'Download SQLite DB artifact'
+
+                - powershell: |
+                    $ErrorActionPreference = 'Stop'
+                    $srcDb = Join-Path (Join-Path '$(Pipeline.Workspace)' 'bizscraper-sqlite-db') 'bizscraper.db'
+                    $destDb = '$(sqliteDbPath)'
+                    $destDir = Split-Path $destDb -Parent
+                    if (-not (Test-Path $destDir)) {
+                        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                    }
+                    Write-Host "Copying SQLite DB: $srcDb => $destDb"
+                    Copy-Item -Path $srcDb -Destination $destDb -Force
+                    Write-Host "SQLite DB size: $((Get-Item $destDb).Length) bytes"
+                  displayName: 'Deploy SQLite DB'
+
+                - powershell: |
+                    $ErrorActionPreference = 'Stop'
+                    & "$(Pipeline.Workspace)\$(cdScriptsArtifactName)\health-check.ps1" `
+                      -HealthCheckUrl '$(healthCheckUrl)'
+                  displayName: 'Health check deployed application'

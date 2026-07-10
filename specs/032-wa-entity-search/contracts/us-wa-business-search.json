@@ -1,0 +1,203 @@
+{
+  "_note": "This is a design-time API contract describing the consumer-facing schema. The production engine definition in src/BizScraper.Api/Infrastructure/Scraping/Definitions/ uses a different metadata format (definitionSlug, endpoint) per FlowDefinitionV2 schema.",
+  "$schema": "http://localhost:3000/schemas/script-definition-v2.json",
+  "metadata": {
+    "name": "us-wa-business-search",
+    "state": "WA",
+    "action": "business-search",
+    "description": "Washington Secretary of State CCFS business entity search. Search by business name in the AngularJS SPA, paginate through results (25 per page), extract business name, UBI number, type, principal office, registered agent, and status.",
+    "version": "1.0",
+    "audience": "v2-api-consumers",
+    "maintainer": "BizScraper.Api",
+    "lastUpdated": "2026-04-05",
+    "baseurl": "https://ccfs.sos.wa.gov/#/"
+  },
+  "variables": {
+    "searchTerm": {
+      "type": "string",
+      "required": true,
+      "description": "Business name to search (e.g., 'Starbucks', 'Microsoft')",
+      "validation": {
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    }
+  },
+  "actions": [
+    {
+      "id": "navigate-ccfs",
+      "type": "navigate",
+      "description": "Load Washington CCFS Corporation Search SPA",
+      "url": "https://ccfs.sos.wa.gov/#/",
+      "timeout": 15000,
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-for-search-form",
+      "type": "wait-for-selector",
+      "description": "Wait for AngularJS SPA to render the search input field",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "input[type='text']",
+          "timeout": 10000
+        }
+      ],
+      "errorHandling": "throw"
+    },
+    {
+      "id": "check-cloudflare-turnstile",
+      "type": "check-text",
+      "description": "Detect Cloudflare Turnstile challenge page or iframe",
+      "pattern": "challenges\\.cloudflare\\.com|turnstile|Verify you are human",
+      "isRegex": true,
+      "onMatch": "throw",
+      "errorType": "cloudflare-blocked",
+      "errorMessage": "Cloudflare Turnstile challenge detected. Request blocked by anti-bot protection."
+    },
+    {
+      "id": "fill-search-term",
+      "type": "fill",
+      "description": "Enter business name into the CCFS search input",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "input[type='text']"
+        }
+      ],
+      "value": "${searchTerm}",
+      "errorHandling": "throw"
+    },
+    {
+      "id": "click-search",
+      "type": "click",
+      "description": "Click the Search button to submit the search query",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "button[type='submit']"
+        }
+      ],
+      "waitAfter": "networkidle",
+      "timeout": 15000,
+      "screenshot": { "milestone": "01-search-results" },
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-for-results",
+      "type": "wait-for-selector",
+      "description": "Wait for AngularJS to render search results table or no-results message",
+      "selectors": [
+        {
+          "type": "css",
+          "value": "table tbody tr, .no-results",
+          "timeout": 10000
+        }
+      ]
+    },
+    {
+      "id": "extract-search-results",
+      "type": "extract",
+      "description": "Extract business entity results from the CCFS search results table. Each row includes business name, UBI number, business type, principal office, registered agent, and status. Generate uniqueKey from businessID and businessType.",
+      "scriptRef": "extractWaBusinessResults",
+      "storeAs": "results"
+    },
+    {
+      "id": "check-last-page",
+      "type": "extract",
+      "description": "Check if current page is the last page by inspecting pagination controls",
+      "scriptRef": "checkWaLastPage",
+      "storeAs": "isLastPage"
+    },
+    {
+      "id": "paginate",
+      "type": "loop",
+      "description": "Paginate through remaining result pages by clicking next page buttons",
+      "loopType": "pagination",
+      "maxIterations": 25,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "variable-truthy",
+        "variableName": "isLastPage"
+      },
+      "actions": [
+        {
+          "id": "click-next-page",
+          "type": "click",
+          "description": "Click next page button in pagination controls",
+          "selectors": [
+            {
+              "type": "css",
+              "value": "button.next-page, a.next-page, li.next a"
+            }
+          ],
+          "waitAfter": "networkidle",
+          "screenshot": { "milestone": "02-page-${currentPage}" }
+        },
+        {
+          "id": "wait-page-render",
+          "type": "wait-for-selector",
+          "description": "Wait for new page data to render",
+          "selectors": [
+            {
+              "type": "css",
+              "value": "table tbody tr",
+              "timeout": 10000
+            }
+          ]
+        },
+        {
+          "id": "check-last-page-loop",
+          "type": "extract",
+          "description": "Check if current page is the last page",
+          "scriptRef": "checkWaLastPage",
+          "storeAs": "isLastPage"
+        },
+        {
+          "id": "extract-page-results",
+          "type": "extract",
+          "description": "Extract business results from current page",
+          "scriptRef": "extractWaBusinessResults",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "scripts": {
+    "extractWaBusinessResults": {
+      "language": "javascript",
+      "description": "Extracts business entity rows from the CCFS search results table. Generates base64url uniqueKey from businessID and businessType extracted from row onclick/href attributes."
+    },
+    "checkWaLastPage": {
+      "language": "javascript",
+      "description": "Checks pagination controls to determine if the current page is the last page. Returns truthy string if on last page."
+    }
+  },
+  "output": {
+    "variableName": "results",
+    "type": "BusinessEntityResult[]",
+    "schema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "identifier": { "type": "string", "description": "UBI Number" },
+          "entityType": { "type": "string" },
+          "status": { "type": "string" },
+          "principalOfficeAddress": { "type": "string", "nullable": true },
+          "registeredAgentName": { "type": "string", "nullable": true },
+          "uniqueKey": { "type": "string", "description": "Base64url-encoded JSON with businessId and businessType" },
+          "state": { "type": "string", "const": "WA" },
+          "formationDate": { "type": "string", "nullable": true }
+        },
+        "required": ["name", "identifier", "entityType", "status", "uniqueKey", "state"]
+      }
+    }
+  }
+}

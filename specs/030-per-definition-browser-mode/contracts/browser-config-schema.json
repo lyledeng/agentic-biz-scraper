@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BrowserConfig",
+  "description": "Optional per-definition browser mode override. When present in a definition JSON, controls which browser pool the definition executes in.",
+  "type": "object",
+  "required": ["mode"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["local", "remote"],
+      "description": "Browser mode for this definition. 'local' launches a local browser; 'remote' connects to the Azure Playwright workspace."
+    },
+    "channel": {
+      "type": ["string", "null"],
+      "description": "Browser channel for local mode (e.g., 'chrome', 'msedge'). Ignored for remote mode. When null, uses bundled Chromium.",
+      "examples": ["chrome", "msedge"]
+    },
+    "headless": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to run in headless mode for local launches. Ignored for remote mode."
+    }
+  },
+  "additionalProperties": false
+}

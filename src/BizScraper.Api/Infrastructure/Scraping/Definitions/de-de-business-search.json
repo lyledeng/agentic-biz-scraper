@@ -1,0 +1,235 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "b657a868-6a75-4f1a-9690-eb4931f7af26",
+    "definitionSlug": "de-de-business-search",
+    "name": "Germany Business Search (Handelsregister)",
+    "description": "Search German commercial register",
+    "state": "DE",
+    "endpoint": "business-search"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "maxPages",
+      "source": "config"
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://www.handelsregister.de/rp_web/normalesuche/welcome.xhtml"
+    },
+    {
+      "name": "results",
+      "source": "extracted"
+    },
+    {
+      "name": "pageResults",
+      "source": "extracted"
+    },
+    {
+      "name": "paginationInfo",
+      "source": "extracted"
+    },
+    {
+      "name": "previousPaginatorText",
+      "source": "extracted"
+    },
+    {
+      "name": "warningMessage",
+      "source": "extracted"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Handelsregister Normal Search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "extract",
+      "description": "Dismiss cookie consent banner if present",
+      "javascript": "() =\u003E { const btn = document.querySelector(\u0027button.ui-cookie-consent-btn, .cc-btn.cc-dismiss, button[aria-label=\u0022Okay\u0022], a.cc-btn\u0027); if (btn) { btn.click(); return \u0027dismissed\u0027; } return \u0027none\u0027; }",
+      "storeAs": "__cookieConsent"
+    },
+    {
+      "id": "action-001b",
+      "order": 1,
+      "type": "extract",
+      "description": "Truncate searchTerm to max 5 words (Handelsregister keyword limit)",
+      "javascript": "() =\u003E { const term = \u0027${searchTerm}\u0027; const words = term.split(/\\s+/); return words.length \u003E 5 ? words.slice(0, 5).join(\u0027 \u0027) : term; }",
+      "storeAs": "searchTerm"
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "fill",
+      "description": "Enter company name into search field (max 5 words)",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "textarea[name=\u0027form:schlagwoerter\u0027], #form\\:schlagwoerter",
+            "confidence": 1
+          }
+        ]
+      },
+      "value": "${searchTerm}"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "click",
+      "description": "Submit search form",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "button[name=\u0027form:btnSuche\u0027], #form\\:btnSuche",
+            "confidence": 1
+          }
+        ]
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "02-search-submitted"
+      }
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "extract",
+      "description": "Extract search results from first page",
+      "javascript": "() =\u003E { const results = []; const tables = document.querySelectorAll(\u0027table.ui-panelgrid.ui-widget\u0027); for (const table of tables) { const oddRow = table.querySelector(\u0027tr.ui-panelgrid-odd, tr.ui-widget-content:nth-child(2)\u0027); if (!oddRow) continue; const cells = oddRow.querySelectorAll(\u0027td\u0027); if (cells.length \u003C 3) continue; const nameCell = oddRow.querySelector(\u0027td.paddingBottom20Px\u0027); const officeCell = oddRow.querySelector(\u0027td.sitzSuchErgebnisse\u0027); const companyName = nameCell ? nameCell.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; const registeredOffice = officeCell ? officeCell.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; let status = \u0027\u0027; for (let i = 0; i \u003C cells.length; i\u002B\u002B) { if (cells[i].classList.contains(\u0027sitzSuchErgebnisse\u0027) \u0026\u0026 i \u002B 1 \u003C cells.length) { status = cells[i \u002B 1].textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim(); break; } } const headerBold = table.querySelector(\u0027span.fontWeightBold\u0027); const registrationId = headerBold ? headerBold.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; if (companyName) { results.push({ companyName, registeredOffice, status, registrationId }); } } return JSON.stringify(results); }",
+      "storeAs": "results"
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "extract",
+      "description": "Extract pagination info from paginator",
+      "javascript": "() =\u003E { const paginatorText = document.querySelector(\u0027span.ui-paginator-current\u0027); if (!paginatorText) return JSON.stringify({ siteTotalCount: -1, currentPage: 1, totalPages: 1 }); const text = paginatorText.textContent.trim(); const match = text.match(/(\\d\u002B)-(\\d\u002B)\\s\u002Bof\\s\u002B(\\d\u002B)/i); if (match) { const start = parseInt(match[1]); const end = parseInt(match[2]); const total = parseInt(match[3]); const perPage = end - start \u002B 1; const totalPages = perPage \u003E 0 ? Math.ceil(total / perPage) : 1; const currentPage = perPage \u003E 0 ? Math.ceil(end / perPage) : 1; return JSON.stringify({ siteTotalCount: total, currentPage, totalPages }); } return JSON.stringify({ siteTotalCount: -1, currentPage: 1, totalPages: 1 }); }",
+      "storeAs": "paginationInfo"
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "check-text",
+      "description": "Detect exceeded-hits warning (store as data, do NOT throw)",
+      "pattern": "maximum number of 100 hits has been exceeded",
+      "onMatch": "store",
+      "storeAs": "warningMessage",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "div.warning.displayBlock",
+            "confidence": 1
+          }
+        ]
+      },
+      "javascript": "() =\u003E { const el = document.querySelector(\u0027div.warning.displayBlock, .ui-outputpanel.warning.displayBlock\u0027); if (!el) return null; return el.textContent.replace(/[\\u00d7\\u2715]/g, \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); }"
+    },
+    {
+      "id": "action-007",
+      "order": 7,
+      "type": "screenshot",
+      "description": "Capture first page results",
+      "milestone": "03-first-page-results"
+    },
+    {
+      "id": "action-008",
+      "order": 8,
+      "type": "loop",
+      "description": "Paginate through remaining AJAX pages",
+      "loopType": "pagination",
+      "maxIterations": 10,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "element-exists",
+          "selector": "a.ui-paginator-next:not(.ui-state-disabled)"
+        }
+      },
+      "actions": [
+        {
+          "id": "action-009",
+          "order": 9,
+          "type": "extract",
+          "description": "Save current paginator text before clicking next",
+          "javascript": "() =\u003E { const el = document.querySelector(\u0027span.ui-paginator-current\u0027); return el ? el.textContent.trim() : \u0027\u0027; }",
+          "storeAs": "previousPaginatorText"
+        },
+        {
+          "id": "action-010",
+          "order": 10,
+          "type": "click",
+          "description": "Click next page link",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "a.ui-paginator-next:not(.ui-state-disabled)",
+                "confidence": 1
+              }
+            ]
+          }
+        },
+        {
+          "id": "action-011",
+          "order": 11,
+          "type": "wait-for-condition",
+          "description": "Wait for AJAX pagination to refresh results (paginator text changes)",
+          "javascript": "() =\u003E { const el = document.querySelector(\u0027span.ui-paginator-current\u0027); if (!el) return false; const currentText = el.textContent.trim(); return currentText !== \u0027\u0027 \u0026\u0026 currentText !== \u0027${previousPaginatorText}\u0027; }",
+          "timeoutMs": 15000
+        },
+        {
+          "id": "action-012",
+          "order": 12,
+          "type": "extract",
+          "description": "Extract page results after AJAX refresh",
+          "javascript": "() =\u003E { const results = []; const tables = document.querySelectorAll(\u0027table.ui-panelgrid.ui-widget\u0027); for (const table of tables) { const oddRow = table.querySelector(\u0027tr.ui-panelgrid-odd, tr.ui-widget-content:nth-child(2)\u0027); if (!oddRow) continue; const cells = oddRow.querySelectorAll(\u0027td\u0027); if (cells.length \u003C 3) continue; const nameCell = oddRow.querySelector(\u0027td.paddingBottom20Px\u0027); const officeCell = oddRow.querySelector(\u0027td.sitzSuchErgebnisse\u0027); const companyName = nameCell ? nameCell.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; const registeredOffice = officeCell ? officeCell.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; let status = \u0027\u0027; for (let i = 0; i \u003C cells.length; i\u002B\u002B) { if (cells[i].classList.contains(\u0027sitzSuchErgebnisse\u0027) \u0026\u0026 i \u002B 1 \u003C cells.length) { status = cells[i \u002B 1].textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim(); break; } } const headerBold = table.querySelector(\u0027span.fontWeightBold\u0027); const registrationId = headerBold ? headerBold.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; if (companyName) { results.push({ companyName, registeredOffice, status, registrationId }); } } return JSON.stringify(results); }",
+          "storeAs": "pageResults"
+        },
+        {
+          "id": "action-013",
+          "order": 13,
+          "type": "screenshot",
+          "description": "Capture page results",
+          "milestone": "04-page-${currentPage}"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "GermanySearchResponse",
+    "compose": {
+      "results": "results",
+      "paginationInfo": "paginationInfo",
+      "warning": "warningMessage"
+    }
+  }
+}

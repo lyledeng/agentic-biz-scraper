@@ -1,0 +1,96 @@
+<wk-icon-default-sprite-pds3></wk-icon-default-sprite-pds3>
+<div class="search-page">
+  <h1 class="page-title">Business Entity Search</h1>
+  <p class="page-subtitle">Search for business entities registered in Colorado, Iowa, Missouri, Washington, Wyoming, or Germany.</p>
+
+  <card-pds3 flowClass="search-card">
+    <div class="search-form">
+      <div class="search-field-name">
+        <text-field-pds3 label="Business Name" [labelFor]="'search-term'" [labelId]="'search-term-label'">
+          <input
+            [id]="'search-term'"
+            type="text"
+            [value]="searchTerm"
+            (input)="searchTerm = $any($event.target).value"
+            (keydown.enter)="onSearch(searchTerm, selectedState)"
+            placeholder="Enter business name..."
+          />
+        </text-field-pds3>
+      </div>
+
+      <div class="search-field-state">
+        <select-field-pds3 label="Country / State" [labelFor]="'state-select'" [labelId]="'state-select-label'">
+          <select [id]="'state-select'" (change)="selectedState = $any($event.target).value">
+            <optgroup label="United States">
+              <option value="CO">Colorado (CO)</option>
+              <option value="IA">Iowa (IA)</option>
+              <option value="MO">Missouri (MO)</option>
+              <option value="WA">Washington (WA)</option>
+              <option value="WY">Wyoming (WY)</option>
+            </optgroup>
+            <optgroup label="Europe">
+              <option value="DE">Germany (DE)</option>
+            </optgroup>
+          </select>
+        </select-field-pds3>
+      </div>
+
+      <div class="search-field-btn">
+        <button-field-pds3 type="primary">
+          <button type="button" (click)="onSearch(searchTerm, selectedState)">Search</button>
+        </button-field-pds3>
+      </div>
+    </div>
+  </card-pds3>
+
+  <app-loading-indicator [loading]="loading()"></app-loading-indicator>
+  <app-error-banner [errorMessage]="warning()" notificationType="warning"></app-error-banner>
+  <app-error-banner [errorMessage]="error()"></app-error-banner>
+
+  @if (!loading() && results().length > 0) {
+    <div class="results-section">
+      <h2 class="section-title">Results <span class="result-count">({{ results().length }})</span></h2>
+      <card-pds3 flowClass="table-card">
+        <simple-table-pds3>
+          <table role="grid" aria-label="Search results">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Identifier</th>
+                <th>Status</th>
+                <th>Entity Type</th>
+                <th>Formation Date</th>
+                <th>Country / State</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (result of results(); track result.uniqueKey) {
+                <tr class="clickable-row" (click)="onSelectResult(result)" tabindex="0" (keydown.enter)="onSelectResult(result)" role="row">
+                  <td>{{ result.name }}</td>
+                  <td>{{ result.identifier }}</td>
+                  <td>{{ result.status }}</td>
+                  <td>{{ result.entityType }}</td>
+                  <td>{{ result.formationDate ?? '—' }}</td>
+                  <td>{{ stateDisplayLabel(result.state) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </simple-table-pds3>
+      </card-pds3>
+    </div>
+  }
+
+  @if (!loading() && !hasSearched() && !error() && !warning()) {
+    <div class="empty-state">
+      <p>Enter a business name above and click <strong>Search</strong> to find registered entities.</p>
+    </div>
+  }
+
+  @if (!loading() && hasSearched() && results().length === 0 && !error() && !warning()) {
+    <notification-pds3 type="info" notificationRole="status">
+      <h4 *notificationHeadingPds3>No Records Found</h4>
+      <span *notificationContentPds3>No records found for "{{ lastSearchTerm }}" in {{ stateDisplayLabel(lastSearchState) }}.</span>
+    </notification-pds3>
+  }
+</div>

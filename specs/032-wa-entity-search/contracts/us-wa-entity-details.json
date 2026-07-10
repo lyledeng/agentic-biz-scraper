@@ -1,0 +1,263 @@
+{
+  "_note": "This is a design-time API contract describing the consumer-facing schema. The production engine definition in src/BizScraper.Api/Infrastructure/Scraping/Definitions/ uses a different metadata format (definitionSlug, endpoint) per FlowDefinitionV2 schema.",
+  "$schema": "http://localhost:3000/schemas/script-definition-v2.json",
+  "metadata": {
+    "name": "us-wa-entity-details",
+    "state": "WA",
+    "action": "entity-details",
+    "description": "Washington Secretary of State CCFS entity detail retrieval. Navigate to entity detail page by business ID, extract general info (including nonprofit fields), registered agent, governors/officers, and filing history with document downloads via page-level fetch().",
+    "version": "1.0",
+    "audience": "v2-api-consumers",
+    "maintainer": "BizScraper.Api",
+    "lastUpdated": "2026-04-05",
+    "baseurl": "https://ccfs.sos.wa.gov/#/BusinessSearch/"
+  },
+  "variables": {
+    "uniqueKey": {
+      "type": "string",
+      "required": true,
+      "description": "Base64url-encoded JSON key: { \"state\": \"US-WA\", \"params\": { \"businessId\": \"{id}\", \"businessType\": \"{type}\" } }"
+    },
+    "correlationId": {
+      "type": "string",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    "maxFilingDocuments": {
+      "type": "integer",
+      "required": false,
+      "default": 10,
+      "description": "Maximum number of most recent filings to download documents for"
+    }
+  },
+  "actions": [
+    {
+      "id": "decode-unique-key",
+      "type": "script",
+      "description": "Decode base64url uniqueKey to extract businessId and businessType",
+      "scriptRef": "decodeUniqueKey",
+      "storeAs": "keyParams"
+    },
+    {
+      "id": "navigate-detail-page",
+      "type": "navigate",
+      "description": "Load the WA CCFS entity detail page by business ID",
+      "url": "https://ccfs.sos.wa.gov/#/BusinessSearch/${keyParams.businessId}",
+      "timeout": 15000,
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-detail-render",
+      "type": "wait-for-selector",
+      "description": "Wait for AngularJS to render entity detail with business name",
+      "selectors": [
+        {
+          "type": "css",
+          "value": ".business-name, h2, [ng-bind*='businessName']",
+          "timeout": 15000
+        }
+      ],
+      "screenshot": { "milestone": "01-entity-detail" },
+      "errorHandling": "throw"
+    },
+    {
+      "id": "extract-general-info",
+      "type": "extract",
+      "description": "Extract general information fields: name, UBI, type, status, addresses, expiration date, jurisdiction, formation date, duration, inactive date, nature of business, and nonprofit-specific fields",
+      "scriptRef": "extractWaGeneralInfo",
+      "storeAs": "details"
+    },
+    {
+      "id": "extract-registered-agent",
+      "type": "extract",
+      "description": "Extract registered agent: name, street address, mailing address",
+      "scriptRef": "extractWaRegisteredAgent",
+      "storeAs": "registeredAgent"
+    },
+    {
+      "id": "extract-governors",
+      "type": "extract",
+      "description": "Extract governors/officers table: title, type, entity name, first name, last name",
+      "scriptRef": "extractWaGovernors",
+      "storeAs": "governors"
+    },
+    {
+      "id": "extract-filing-history",
+      "type": "extract",
+      "description": "Extract filing history table: filing number, date/time, effective date, filing type",
+      "scriptRef": "extractWaFilingHistory",
+      "storeAs": "filings"
+    },
+    {
+      "id": "download-filing-documents",
+      "type": "loop",
+      "description": "For each of the N most recent filings, use page-level fetch() to call GetTransactionDocumentsList API, then download each document via DownloadOnlineFilesByNumber — preserving session cookies",
+      "loopType": "iterate",
+      "iterateOver": "filings",
+      "maxIterations": "${maxFilingDocuments}",
+      "errorHandling": "continue-on-error",
+      "actions": [
+        {
+          "id": "fetch-document-list",
+          "type": "script",
+          "description": "Call GetTransactionDocumentsList via page-level fetch() to get documents for this filing",
+          "scriptRef": "fetchWaDocumentList",
+          "storeAs": "item.documentList"
+        },
+        {
+          "id": "download-documents",
+          "type": "loop",
+          "description": "Download each document in the filing's document list",
+          "loopType": "iterate",
+          "iterateOver": "item.documentList",
+          "errorHandling": "continue-on-error",
+          "actions": [
+            {
+              "id": "download-document",
+              "type": "script",
+              "description": "Download document via page-level fetch() to DownloadOnlineFilesByNumber endpoint, base64-encode, upload to Azure Blob Storage",
+              "scriptRef": "downloadWaDocument",
+              "storeTo": "azure-blob",
+              "blobPath": "${correlationId}/wa/${keyParams.businessId}/${item.fileName}",
+              "storeAs": "item.storageUrl",
+              "errorHandling": "continue-on-error"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "compose-result",
+      "type": "script",
+      "description": "Compose WashingtonEntityDetails from details, registeredAgent, governors, and filings with documents",
+      "scriptRef": "composeWaEntityDetails",
+      "storeAs": "entityDetails"
+    }
+  ],
+  "scripts": {
+    "decodeUniqueKey": {
+      "language": "javascript",
+      "description": "Decodes base64url uniqueKey JSON and returns { businessId, businessType }."
+    },
+    "extractWaGeneralInfo": {
+      "language": "javascript",
+      "description": "Extracts general information fields from the CCFS detail page DOM, including nonprofit-specific fields when present."
+    },
+    "extractWaRegisteredAgent": {
+      "language": "javascript",
+      "description": "Extracts registered agent name, street address, and mailing address from the detail page."
+    },
+    "extractWaGovernors": {
+      "language": "javascript",
+      "description": "Extracts governors/officers table: title, governor type, entity name, first name, last name."
+    },
+    "extractWaFilingHistory": {
+      "language": "javascript",
+      "description": "Extracts filing history records: filing number, filing date/time, effective date, filing type."
+    },
+    "fetchWaDocumentList": {
+      "language": "javascript",
+      "description": "Calls GetTransactionDocumentsList API via page-level fetch() to retrieve documents for a filing."
+    },
+    "downloadWaDocument": {
+      "language": "javascript",
+      "description": "Downloads a document via page-level fetch() to DownloadOnlineFilesByNumber, returns base64-encoded content."
+    },
+    "composeWaEntityDetails": {
+      "language": "javascript",
+      "description": "Composes the final WashingtonEntityDetails object from extracted details, registeredAgent, governors, and filings."
+    }
+  },
+  "output": {
+    "variableName": "entityDetails",
+    "type": "WashingtonEntityDetails",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "uniqueKey": { "type": "string" },
+        "state": { "type": "string", "const": "WA" },
+        "details": {
+          "type": "object",
+          "description": "WashingtonGeneralInfo — General information fields",
+          "properties": {
+            "name": { "type": "string" },
+            "ubiNumber": { "type": "string" },
+            "businessType": { "type": "string" },
+            "status": { "type": "string" },
+            "principalOfficeStreetAddress": { "type": "string", "nullable": true },
+            "principalOfficeMailingAddress": { "type": "string", "nullable": true },
+            "expirationDate": { "type": "string", "nullable": true },
+            "jurisdiction": { "type": "string", "nullable": true },
+            "formationDate": { "type": "string", "nullable": true },
+            "periodOfDuration": { "type": "string", "nullable": true },
+            "inactiveDate": { "type": "string", "nullable": true },
+            "natureOfBusiness": { "type": "string", "nullable": true },
+            "charitableCorporation": { "type": "boolean", "nullable": true },
+            "nonprofitEin": { "type": "string", "nullable": true },
+            "grossRevenueUnder500K": { "type": "boolean", "nullable": true },
+            "hasMembers": { "type": "boolean", "nullable": true },
+            "publicBenefitDesignation": { "type": "boolean", "nullable": true },
+            "hostHome": { "type": "boolean", "nullable": true }
+          },
+          "required": ["name", "ubiNumber", "status"]
+        },
+        "registeredAgent": {
+          "type": "object",
+          "nullable": true,
+          "description": "WashingtonRegisteredAgent — Agent info",
+          "properties": {
+            "name": { "type": "string" },
+            "streetAddress": { "type": "string", "nullable": true },
+            "mailingAddress": { "type": "string", "nullable": true }
+          },
+          "required": ["name"]
+        },
+        "governors": {
+          "type": "array",
+          "description": "WashingtonGovernor[] — Officers and governors",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "governorType": { "type": "string", "description": "INDIVIDUAL or ENTITY" },
+              "entityName": { "type": "string", "nullable": true },
+              "firstName": { "type": "string", "nullable": true },
+              "lastName": { "type": "string", "nullable": true }
+            },
+            "required": ["title", "governorType"]
+          }
+        },
+        "filings": {
+          "type": "array",
+          "description": "WashingtonFilingRecord[] — Filing history with documents",
+          "items": {
+            "type": "object",
+            "properties": {
+              "filingNumber": { "type": "string" },
+              "filingDateTime": { "type": "string", "nullable": true },
+              "effectiveDate": { "type": "string", "nullable": true },
+              "filingType": { "type": "string" },
+              "documents": {
+                "type": "array",
+                "description": "WashingtonFilingDocument[] — Documents for this filing",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "documentType": { "type": "string" },
+                    "createdDate": { "type": "string", "nullable": true },
+                    "storageUrl": { "type": "string", "nullable": true, "description": "Proxy URL to downloaded document" },
+                    "fileName": { "type": "string", "nullable": true },
+                    "error": { "type": "string", "nullable": true, "description": "Error if download failed" }
+                  },
+                  "required": ["documentType"]
+                }
+              }
+            },
+            "required": ["filingNumber", "filingType"]
+          }
+        }
+      },
+      "required": ["uniqueKey", "state", "details"]
+    }
+  }
+}

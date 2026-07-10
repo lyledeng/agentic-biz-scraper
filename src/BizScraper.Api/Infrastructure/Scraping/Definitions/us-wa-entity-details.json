@@ -1,0 +1,215 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "b2c3d4e5-6f78-9012-bc34-de56fg78hi90",
+    "definitionSlug": "us-wa-entity-details",
+    "name": "Washington Entity Details",
+    "description": "Extract entity details from Washington CCFS by searching UBI, clicking into the detail page (letting AngularJS handle navigation and API calls), then extracting structured data from the AngularJS scope",
+    "state": "WA",
+    "endpoint": "entity-details"
+  },
+  "browser": {
+    "mode": "windows",
+    "channel": "msedge",
+    "headless": false
+  },
+  "variables": [
+    {
+      "name": "businessId",
+      "source": "runtime",
+      "required": true,
+      "description": "WA CCFS business ID (injected by handler from decoded uniqueKey)"
+    },
+    {
+      "name": "businessType",
+      "source": "runtime",
+      "required": true,
+      "description": "WA CCFS business type (injected by handler from decoded uniqueKey)"
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    {
+      "name": "maxFilingDocuments",
+      "source": "config",
+      "defaultValue": 10,
+      "description": "Maximum number of most recent filings to download documents for"
+    },
+    {
+      "name": "details",
+      "source": "extracted",
+      "description": "General information fields from detail page"
+    },
+    {
+      "name": "registeredAgent",
+      "source": "extracted",
+      "description": "Registered agent information"
+    },
+    {
+      "name": "governors",
+      "source": "extracted",
+      "description": "Governors/officers list"
+    },
+    {
+      "name": "filings",
+      "source": "extracted",
+      "description": "Filing history records with document metadata"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load WA CCFS home page — must warm up Turnstile via search interaction before API calls work",
+      "url": "https://ccfs.sos.wa.gov/#/",
+      "waitUntil": "domcontentloaded",
+      "screenshot": {
+        "milestone": "wa-detail-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "check-text",
+      "description": "Detect Cloudflare Turnstile challenge page",
+      "pattern": "challenges\\.cloudflare\\.com|Verify you are human",
+      "isRegex": true,
+      "onMatch": "throw",
+      "errorType": "cloudflare-blocked",
+      "errorMessage": "Cloudflare Turnstile challenge detected. Request blocked by anti-bot protection."
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "wait-for-condition",
+      "description": "Wait for AngularJS SPA to render search input (proves page and Angular fully loaded)",
+      "javascript": "() => !!document.querySelector('input[placeholder=\"Business Name\"]')",
+      "timeoutMs": 15000
+    },
+    {
+      "id": "action-002b",
+      "order": 2,
+      "type": "wait-for-condition",
+      "description": "Wait for initial Cloudflare Turnstile to complete or disappear before interacting (matches working search definition)",
+      "javascript": "() => { var cf = document.querySelector('iframe[src*=\"challenges.cloudflare.com\"]'); if (!cf) return true; try { var box = cf.getBoundingClientRect(); if (box.width === 0 && box.height === 0) return true; } catch(e) { return true; } var text = document.body.innerText; if (text.includes('Verifying')) return false; return true; }",
+      "timeoutMs": 15000
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "extract",
+      "description": "Fill Business Name with dummy search term 'a' to trigger Turnstile warm-up via AngularJS ngModel (same pattern as working search definition)",
+      "javascript": "() => { var inputs = Array.from(document.querySelectorAll('input[type=\"text\"], input:not([type])')); var input = inputs.find(function(i) { return i.placeholder && i.placeholder.toLowerCase().includes('business'); }); if (!input) throw new Error('Business Name input not found'); input.focus(); try { var ngModelCtrl = angular.element(input).controller('ngModel'); if (ngModelCtrl) { ngModelCtrl.$setViewValue('a'); ngModelCtrl.$render(); angular.element(input).scope().$apply(); return 'ok'; } } catch(e) {} input.value = 'a'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); try { angular.element(input).scope().$apply(); } catch(e2) {} return 'ok'; }",
+      "storeAs": "_fillResult"
+    },
+    {
+      "id": "action-003b",
+      "order": 3,
+      "type": "wait-for-condition",
+      "description": "Wait for Corporation Search button to become enabled after AngularJS processes input",
+      "javascript": "() => { var btns = document.querySelectorAll('button:not([disabled])'); return Array.from(btns).some(function(b) { return b.querySelector('strong') && b.textContent.includes('Search'); }); }",
+      "timeoutMs": 5000
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "click",
+      "description": "Click Corporation Search button — this triggers the API call which forces Turnstile to challenge and auto-resolve in headed Chrome",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "xpath",
+            "value": "//button[not(@disabled)][.//strong[contains(text(),'Search')]]",
+            "confidence": 0.95
+          },
+          {
+            "strategy": "xpath",
+            "value": "//input[@placeholder='Business Name']/ancestor::div[3]//button[not(@disabled)]",
+            "confidence": 0.85
+          }
+        ],
+        "description": "Corporation Search submit button"
+      },
+      "waitAfter": "domcontentloaded",
+      "screenshot": {
+        "milestone": "wa-detail-02-after-search-click"
+      }
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "wait-for-condition",
+      "description": "Wait for search result rows to appear — proves Turnstile has resolved and API calls are working. Up to 60s for the full Turnstile challenge-resolve-retry cycle.",
+      "javascript": "() => { var rows = document.querySelectorAll('table.table-striped tbody tr[ng-repeat] td'); return rows.length > 0; }",
+      "timeoutMs": 60000,
+      "screenshot": {
+        "milestone": "wa-detail-03-search-results"
+      }
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "extract",
+      "description": "Install XHR interceptor to capture API responses, then call showBusineInfo() from the search controller scope — this is the exact function the SPA calls when a user clicks a business name link, handling all internal state + routing correctly",
+      "javascript": "() => { var origOpen = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function(method, url) { this.__captureUrl = url; var xhr = this; var wrappedLoad = function() { try { var u = xhr.__captureUrl || ''; if (u.indexOf('BusinessInformation') > -1) { window.__bizInfo = JSON.parse(xhr.responseText); } if (u.indexOf('GetBusinessFilingList') > -1) { window.__bizFilings = JSON.parse(xhr.responseText); } } catch(e) {} }; this.addEventListener('load', wrappedLoad); return origOpen.apply(this, arguments); }; var row = document.querySelector('tr[ng-repeat]'); if (!row) return JSON.stringify({ error: 'no-search-rows-found' }); var scope = angular.element(row).scope(); var fn = scope.showBusineInfo || scope.$parent.showBusineInfo || scope.$root.showBusineInfo; if (!fn) { var el = document.querySelector('[ng-controller]'); if (el) { var cs = angular.element(el).scope(); fn = cs.showBusineInfo || cs.$parent.showBusineInfo; } } if (!fn) return JSON.stringify({ error: 'showBusineInfo-not-found', scopeKeys: Object.keys(scope).filter(function(k){return k[0]!=='$';}).join(',') }); fn(${businessId}, '${businessType}'); try { scope.$apply(); } catch(e) {} return JSON.stringify({ ok: true, businessId: '${businessId}', businessType: '${businessType}' }); }",
+      "storeAs": "_navResult"
+    },
+    {
+      "id": "action-006b",
+      "order": 6,
+      "type": "wait-for-condition",
+      "description": "Wait for SPA detail controller to make API call — window.__bizInfo gets populated by XHR interceptor when BusinessInformation response arrives",
+      "javascript": "() => { if (!window.__navStart) window.__navStart = Date.now(); if (window.__bizInfo && typeof window.__bizInfo === 'object') return true; return Date.now() - window.__navStart > 15000; }",
+      "timeoutMs": 25000,
+      "screenshot": {
+        "milestone": "wa-detail-04-detail-page"
+      }
+    },
+    {
+      "id": "action-007",
+      "order": 7,
+      "type": "extract",
+      "description": "Extract business details from window.__bizInfo (populated by XHR interceptor capturing the SPA's own BusinessInformation API response)",
+      "javascript": "() => { var data = window.__bizInfo; if (!data || typeof data !== 'object') { return JSON.stringify({ _fetchFailed: true, error: 'no-data-captured', hasBizInfo: !!window.__bizInfo, bizInfoType: typeof window.__bizInfo, hash: window.location.hash, textPreview: document.body.innerText.substring(0, 500) }); } function addr(v) { if (!v || typeof v !== 'object') return (v === null || v === undefined || v === '') ? null : String(v); var street = v.StreetAddress || v.streetAddress || v.Street || v.street || v.StreetAddress1 || v.Line1 || v.Address1 || v.AddressLine1 || ''; var city = v.City || v.city || ''; var state = v.State || v.state || v.StateProvince || ''; var zip = v.Zip || v.zip || v.ZipCode || v.zipCode || v.PostalCode || v.postalCode || ''; var country = v.Country || v.country || ''; var parts = [street, city, state, zip, country].filter(function(p) { return p && typeof p === 'string' && p.trim().length > 0; }); return parts.length > 0 ? parts.join(', ') : null; } var g = function(obj) { var names = Array.prototype.slice.call(arguments, 1); for (var i = 0; i < names.length; i++) { var v = obj[names[i]]; if (v !== undefined && v !== null && v !== '') { if (typeof v === 'object') return addr(v); return String(v); } } return null; }; return JSON.stringify({ name: g(data, 'BusinessName', 'businessName', 'EntityName', 'entityName'), ubiNumber: g(data, 'UBINumber', 'ubiNumber', 'UBI', 'ubi', 'BusinessID', 'businessID'), businessType: g(data, 'BusinessTypeDescription', 'BusinessType', 'businessType'), status: g(data, 'BusinessStatusDescription', 'BusinessStatus', 'Status', 'status'), principalOfficeStreetAddress: g(data, 'PrincipalOfficeStreetAddress', 'principalOfficeStreetAddress'), principalOfficeMailingAddress: g(data, 'PrincipalOfficeMailingAddress', 'principalOfficeMailingAddress'), expirationDate: g(data, 'ExpirationDate', 'expirationDate'), jurisdiction: g(data, 'StateOfIncorporation', 'stateOfIncorporation', 'Jurisdiction', 'jurisdiction'), formationDate: g(data, 'FormationDate', 'formationDate', 'RegistrationDate', 'registrationDate'), periodOfDuration: g(data, 'PeriodOfDuration', 'periodOfDuration'), inactiveDate: g(data, 'InactiveDate', 'inactiveDate'), natureOfBusiness: g(data, 'NatureOfBusiness', 'natureOfBusiness'), charitableCorporation: data.CharitableCorporation || data.charitableCorporation || null, nonprofitEin: g(data, 'EIN', 'ein', 'NonprofitEIN', 'nonprofitEin'), grossRevenueUnder500K: data.GrossRevenueUnder500K || data.grossRevenueUnder500K || null, hasMembers: data.HasMembers || data.hasMembers || null, publicBenefitDesignation: data.PublicBenefitDesignation || data.publicBenefitDesignation || null, hostHome: data.HostHome || data.hostHome || null, _rawKeys: Object.keys(data).join(',') }); }",
+      "storeAs": "details"
+    },
+    {
+      "id": "action-008",
+      "order": 8,
+      "type": "extract",
+      "description": "Extract registered agent from window.__bizInfo (captured by XHR interceptor)",
+      "javascript": "() => { var d = window.__bizInfo; if (!d || d._fetchFailed) return JSON.stringify(null); function addr(v) { if (!v || typeof v !== 'object') return (v === null || v === undefined || v === '') ? null : String(v); var street = v.StreetAddress || v.streetAddress || v.Street || v.street || v.StreetAddress1 || v.Line1 || v.Address1 || v.AddressLine1 || ''; var city = v.City || v.city || ''; var state = v.State || v.state || v.StateProvince || ''; var zip = v.Zip || v.zip || v.ZipCode || v.zipCode || v.PostalCode || v.postalCode || ''; var country = v.Country || v.country || ''; var parts = [street, city, state, zip, country].filter(function(p) { return p && typeof p === 'string' && p.trim().length > 0; }); return parts.length > 0 ? parts.join(', ') : null; } var g = function(obj) { var names = Array.prototype.slice.call(arguments, 1); for (var i = 0; i < names.length; i++) { var v = obj[names[i]]; if (v !== undefined && v !== null && v !== '') { if (typeof v === 'object') return addr(v); return String(v); } } return null; }; var agent = d.RegisteredAgent || d.registeredAgent || d.Agent || d.agent || null; if (agent && typeof agent === 'object') { return JSON.stringify({ name: g(agent, 'AgentName', 'agentName', 'RegisteredAgentName', 'Name', 'name'), streetAddress: g(agent, 'AgentStreetAddress', 'agentStreetAddress', 'StreetAddress', 'streetAddress', 'Street'), mailingAddress: g(agent, 'AgentMailingAddress', 'agentMailingAddress', 'MailingAddress', 'mailingAddress', 'Mailing') }); } return JSON.stringify({ name: g(d, 'AgentName', 'agentName', 'RegisteredAgentName', 'RegisteredAgent'), streetAddress: g(d, 'AgentStreetAddress', 'agentStreetAddress', 'RegisteredAgentStreetAddress'), mailingAddress: g(d, 'AgentMailingAddress', 'agentMailingAddress', 'RegisteredAgentMailingAddress') }); }",
+      "storeAs": "registeredAgent"
+    },
+    {
+      "id": "action-009",
+      "order": 9,
+      "type": "extract",
+      "description": "Extract governors/officers from window.__bizInfo (captured by XHR interceptor)",
+      "javascript": "() => { var d = window.__bizInfo; if (!d || d._fetchFailed) return JSON.stringify([]); var govs = d.Governors || d.governors || d.Officers || d.officers || d.GovernorList || d.governorList || d.GovernorInformation || []; if (!Array.isArray(govs)) return JSON.stringify([]); return JSON.stringify(govs.map(function(g) { return { title: g.Title || g.title || null, governorType: g.GovernorType || g.governorType || g.Type || g.type || null, entityName: g.EntityName || g.entityName || null, firstName: g.FirstName || g.firstName || null, lastName: g.LastName || g.lastName || null }; })); }",
+      "storeAs": "governors"
+    },
+    {
+      "id": "action-010",
+      "order": 10,
+      "type": "extract",
+      "description": "Extract filing history from window.__bizFilings (captured by XHR interceptor when SPA loads filing list)",
+      "javascript": "() => { var data = window.__bizFilings; if (!data) return JSON.stringify([]); var list = Array.isArray(data) ? data : (data && (data.FilingList || data.filingList || data.Filings || data.filings || data.BusinessFilings)) || []; if (!Array.isArray(list)) return JSON.stringify([]); return JSON.stringify(list.map(function(f) { return { filingNumber: f.FilingNumber || f.filingNumber || f.Number || null, filingDateTime: f.FilingDateTime || f.filingDateTime || f.FilingDate || f.filingDate || null, effectiveDate: f.EffectiveDate || f.effectiveDate || null, filingType: f.FilingType || f.filingType || f.Type || null, documents: [] }; })); }",
+      "storeAs": "filings"
+    }
+  ],
+  "output": {
+    "variableName": "entityDetails",
+    "type": "EntityDetailResult",
+    "compose": {
+      "details": "details",
+      "registeredAgent": "registeredAgent",
+      "governors": "governors",
+      "filings": "filings"
+    }
+  }
+}

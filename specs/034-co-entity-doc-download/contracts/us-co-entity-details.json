@@ -1,0 +1,181 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "a7728283-1020-4249-8b5a-ad5883129ca3",
+    "definitionSlug": "us-co-entity-details",
+    "name": "Colorado Entity Details",
+    "description": "Extract entity details from Colorado SOS details page, download certificate of good standing and certified document copies",
+    "state": "CO",
+    "endpoint": "entity-details"
+  },
+  "variables": [
+    {
+      "name": "detailsUrl",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "idNumber",
+      "source": "extracted"
+    },
+    {
+      "name": "details",
+      "source": "extracted"
+    },
+    {
+      "name": "registeredAgent",
+      "source": "extracted"
+    },
+    {
+      "name": "certificateLocalPath",
+      "source": "extracted"
+    },
+    {
+      "name": "certifiedDocumentsViewerUrl",
+      "source": "extracted",
+      "description": "CertificationViewer.do URL extracted from certificate print page"
+    },
+    {
+      "name": "certifiedDocumentsLocalPath",
+      "source": "extracted",
+      "description": "Proxy URL for the certified documents PDF after upload to blob storage"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load entity details page",
+      "url": "${detailsUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "01-detail-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "extract",
+      "description": "Extract Details table",
+      "javascript": "(existing — unchanged)",
+      "storeAs": "details"
+    },
+    {
+      "id": "action-001b",
+      "order": 1,
+      "type": "extract",
+      "description": "Extract idNumber into a top-level variable for certificate filename",
+      "javascript": "(existing — unchanged)",
+      "storeAs": "idNumber"
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "extract",
+      "description": "Extract Registered Agent table",
+      "javascript": "(existing — unchanged)",
+      "storeAs": "registeredAgent"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "screenshot",
+      "description": "Screenshot after table extraction",
+      "milestone": "02-after-table-scraping"
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "download",
+      "description": "Download certificate of good standing if available",
+      "linkSelector": "a:has-text('certificate of good standing'), a:has-text('Certificate of Good Standing')",
+      "validateExtension": ".pdf",
+      "filenamePattern": "${idNumber}-certificateofgoodstanding.pdf",
+      "storeAs": "certificateLocalPath",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('certificate of good standing'), a:has-text('Certificate of Good Standing')"
+      },
+      "screenshot": {
+        "milestone": "03-after-certificate-download"
+      }
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "click",
+      "description": "Click 'Get certified copies of documents' link to navigate to document list",
+      "target": {
+        "selectors": [
+          { "strategy": "css", "value": "a:has-text('Get certified copies of documents')", "confidence": 0.9 }
+        ],
+        "description": "Get certified copies of documents link"
+      },
+      "waitAfter": "networkidle",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('Get certified copies of documents')"
+      }
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "screenshot",
+      "description": "Screenshot certified copies list page",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('All documents')"
+      },
+      "milestone": "04-certified-copies-list"
+    },
+    {
+      "id": "action-007",
+      "order": 7,
+      "type": "click",
+      "description": "Click 'All documents' link to navigate to certificate print page",
+      "target": {
+        "selectors": [
+          { "strategy": "css", "value": "a:has-text('All documents')", "confidence": 0.9 }
+        ],
+        "description": "All documents link"
+      },
+      "waitAfter": "networkidle",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('All documents')"
+      }
+    },
+    {
+      "id": "action-008",
+      "order": 8,
+      "type": "extract",
+      "description": "Extract CertificationViewer.do URL from 'open your form in a new window' link",
+      "javascript": "() => { const link = document.querySelector(\"a[href*='CertificationViewer.do']\"); if (!link) return ''; const href = link.getAttribute('href') || ''; return href.startsWith('http') ? href : new URL(href, window.location.href).toString(); }",
+      "storeAs": "certifiedDocumentsViewerUrl",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a[href*='CertificationViewer.do']"
+      },
+      "screenshot": {
+        "milestone": "05-after-certified-docs-extract"
+      }
+    }
+  ],
+  "output": {
+    "variableName": "details",
+    "type": "EntityDetailResponse",
+    "compose": {
+      "details": "details",
+      "registeredAgent": "registeredAgent",
+      "certificateUrl": "certificateLocalPath",
+      "certifiedDocumentsViewerUrl": "certifiedDocumentsViewerUrl",
+      "certifiedDocumentsUrl": "certifiedDocumentsLocalPath"
+    }
+  }
+}

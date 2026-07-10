@@ -1,0 +1,158 @@
+{
+  "_note": "This is a design-time API contract describing the consumer-facing schema. The production engine definition in src/BizScraper.Api/Infrastructure/Scraping/Definitions/ uses a different metadata format (definitionSlug, endpoint) per FlowDefinitionV2 schema.",
+  "$schema": "http://localhost:3000/schemas/script-definition-v2.json",
+  "metadata": {
+    "name": "us-mo-business-search",
+    "state": "MO",
+    "action": "business-search",
+    "description": "Missouri Secretary of State business entity search. Search by business name using 'Starting With' match, paginate through ASP.NET Web Forms postback results, collapse previous names under parent entities.",
+    "version": "1.0",
+    "audience": "v2-api-consumers",
+    "maintainer": "BizScraper.Api",
+    "lastUpdated": "2026-04-04",
+    "baseurl": "https://bsd.sos.mo.gov/BusinessEntity/BESearch.aspx?SearchType=0"
+  },
+  "variables": {
+    "searchTerm": {
+      "type": "string",
+      "required": true,
+      "description": "Business name to search (e.g., 'Smith', 'Wendy')",
+      "validation": {
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    }
+  },
+  "actions": [
+    {
+      "id": "navigate-search-page",
+      "type": "navigate",
+      "description": "Load Missouri SOS business entity search page",
+      "url": "https://bsd.sos.mo.gov/BusinessEntity/BESearch.aspx?SearchType=0",
+      "timeout": 15000,
+      "errorHandling": "throw"
+    },
+    {
+      "id": "wait-for-search-form",
+      "type": "wait-for-selector",
+      "description": "Ensure search form is rendered with Business Name textbox",
+      "selectors": [
+        {
+          "type": "role",
+          "value": "textbox",
+          "name": "Business Name",
+          "timeout": 5000
+        }
+      ],
+      "errorHandling": "throw"
+    },
+    {
+      "id": "fill-search-term",
+      "type": "fill",
+      "description": "Enter business name into the search field",
+      "selectors": [
+        {
+          "type": "role",
+          "value": "textbox",
+          "name": "Business Name"
+        }
+      ],
+      "value": "${searchTerm}",
+      "errorHandling": "throw"
+    },
+    {
+      "id": "click-search",
+      "type": "click",
+      "description": "Submit the search form via the SEARCH button (ASP.NET postback)",
+      "selectors": [
+        {
+          "type": "title",
+          "value": "Search"
+        }
+      ],
+      "waitAfter": "networkidle",
+      "timeout": 15000,
+      "screenshot": { "milestone": "01-search-results" },
+      "errorHandling": "throw"
+    },
+    {
+      "id": "check-truncation",
+      "type": "check-text",
+      "description": "Detect if results exceed the 1,051 display cap",
+      "pattern": "More than \\d+ records found",
+      "onMatch": "flag-truncated",
+      "storeAs": "truncated"
+    },
+    {
+      "id": "extract-search-results",
+      "type": "extract",
+      "description": "Extract business entity results from the results table, collapsing previous-name rows into parent entities",
+      "scriptRef": "extractMoBusinessResults",
+      "storeAs": "results"
+    },
+    {
+      "id": "paginate",
+      "type": "loop",
+      "description": "Paginate through remaining result pages using ASP.NET postback pager buttons",
+      "loopType": "pagination",
+      "maxIterations": 53,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "element-exists",
+          "description": "Next page pager button"
+        }
+      },
+      "actions": [
+        {
+          "id": "click-next-page",
+          "type": "click",
+          "description": "Click next page pager button",
+          "waitAfter": "networkidle",
+          "screenshot": { "milestone": "page-${currentPage}" }
+        },
+        {
+          "id": "extract-page-results",
+          "type": "extract",
+          "description": "Extract results from current page",
+          "scriptRef": "extractMoBusinessResults",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "scripts": {
+    "extractMoBusinessResults": {
+      "language": "javascript",
+      "description": "Extracts MO business entity rows from the ASP.NET GridView table. Collapses '(previous name)' rows into a previousNames array on the parent entity. Extracts entity ID from the detail link URL for uniqueKey generation."
+    }
+  },
+  "output": {
+    "variableName": "results",
+    "type": "MissouriBusinessSearchResult[]",
+    "schema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "identifier": { "type": "string", "description": "Charter number" },
+          "entityType": { "type": "string" },
+          "status": { "type": "string" },
+          "formationDate": { "type": "string" },
+          "registeredAgentName": { "type": "string" },
+          "previousNames": { "type": "array", "items": { "type": "string" } },
+          "uniqueKey": { "type": "string" },
+          "state": { "type": "string", "const": "MO" }
+        },
+        "required": ["name", "identifier", "uniqueKey", "state"]
+      }
+    }
+  }
+}

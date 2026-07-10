@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "a7728283-1020-4249-8b5a-ad5883129ca3",
+    "definitionSlug": "us-co-entity-details",
+    "name": "Colorado Entity Details",
+    "description": "Extract entity details from Colorado SOS details page",
+    "state": "CO",
+    "endpoint": "entity-details"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "detailsUrl",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "idNumber",
+      "source": "extracted"
+    },
+    {
+      "name": "details",
+      "source": "extracted"
+    },
+    {
+      "name": "registeredAgent",
+      "source": "extracted"
+    },
+    {
+      "name": "certificateLocalPath",
+      "source": "extracted"
+    },
+    {
+      "name": "certifiedDocumentsViewerUrl",
+      "source": "extracted",
+      "description": "CertificationViewer.do URL extracted from certificate print page"
+    },
+    {
+      "name": "certifiedDocumentsLocalPath",
+      "source": "extracted",
+      "description": "Proxy URL for the certified documents PDF after upload to blob storage"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load entity details page",
+      "url": "${detailsUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "01-detail-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "extract",
+      "description": "Extract Details table",
+      "javascript": "() =\u003E { const normalize = (value) =\u003E (value || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const headers = Array.from(document.querySelectorAll(\u0027td.entity_conf_table_header\u0027)); const detailsHeader = headers.find(h =\u003E normalize(h.textContent) === \u0027Details\u0027); if (!detailsHeader) return null; const table = detailsHeader.closest(\u0027table\u0027); if (!table) return null; const data = {}; for (const row of table.rows) { const ths = row.querySelectorAll(\u0027th\u0027); const tds = row.querySelectorAll(\u0027td:not(.entity_conf_table_header)\u0027); if (ths.length === 1 \u0026\u0026 tds.length \u003E= 1) { const key = normalize(ths[0].textContent); if (!(key in data)) { data[key] = normalize(tds[0].textContent); } } else if (ths.length \u003E= 2 \u0026\u0026 tds.length \u003E= 2) { const key0 = normalize(ths[0].textContent); const key1 = normalize(ths[1].textContent); if (!(key0 in data)) { data[key0] = normalize(tds[0].textContent); } if (!(key1 in data)) { data[key1] = normalize(tds[1].textContent); } } } return JSON.stringify({ name: data[\u0027Name\u0027] || data[\u0027Entity Name\u0027] || \u0027\u0027, status: data[\u0027Status\u0027] || \u0027\u0027, formationDate: data[\u0027Formation date\u0027] || data[\u0027Formation Date\u0027] || data[\u0027Date of Formation\u0027] || \u0027\u0027, idNumber: data[\u0027ID number\u0027] || data[\u0027ID Number\u0027] || data[\u0027Entity Id Number\u0027] || \u0027\u0027, form: data[\u0027Form\u0027] || data[\u0027Entity Form\u0027] || \u0027\u0027, periodicReportMonth: data[\u0027Periodic report month\u0027] || data[\u0027Periodic Report Month\u0027] || null, jurisdiction: data[\u0027Jurisdiction\u0027] || data[\u0027Jurisdiction of Organization\u0027] || \u0027\u0027, principalOfficeStreetAddress: data[\u0027Principal office street address\u0027] || data[\u0027Principal Office Street Address\u0027] || null, principalOfficeMailingAddress: data[\u0027Principal office mailing address\u0027] || data[\u0027Principal Office Mailing Address\u0027] || null }); }",
+      "storeAs": "details"
+    },
+    {
+      "id": "action-001b",
+      "order": 1,
+      "type": "extract",
+      "description": "Extract idNumber into a top-level variable for certificate filename",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const headers = Array.from(document.querySelectorAll('td.entity_conf_table_header')); const h = headers.find(h => normalize(h.textContent) === 'Details'); if (!h) return ''; const table = h.closest('table'); if (!table) return ''; for (const row of table.rows) { const th = row.querySelector('th'); const td = row.querySelector('td:not(.entity_conf_table_header)'); if (th && td) { const key = normalize(th.textContent); if (key === 'ID number' || key === 'ID Number' || key === 'Entity Id Number') return normalize(td.textContent); } } return ''; }",
+      "storeAs": "idNumber"
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "extract",
+      "description": "Extract Registered Agent table",
+      "javascript": "() =\u003E { const normalize = (value) =\u003E (value || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const headers = Array.from(document.querySelectorAll(\u0027td.entity_conf_table_header\u0027)); const agentHeader = headers.find(h =\u003E normalize(h.textContent) === \u0027Registered Agent\u0027); if (!agentHeader) return null; const table = agentHeader.closest(\u0027table\u0027); if (!table) return null; const data = {}; for (const row of table.rows) { const th = row.querySelector(\u0027th\u0027); const td = row.querySelector(\u0027td:not(.entity_conf_table_header)\u0027); if (th \u0026\u0026 td) { const key = normalize(th.textContent); if (!(key in data)) { data[key] = normalize(td.textContent); } } } return JSON.stringify({ name: data[\u0027Name\u0027] || data[\u0027Agent Name\u0027] || null, streetAddress: data[\u0027Street address\u0027] || data[\u0027Street Address\u0027] || data[\u0027Registered Agent Street Address\u0027] || null, mailingAddress: data[\u0027Mailing address\u0027] || data[\u0027Mailing Address\u0027] || data[\u0027Registered Agent Mailing Address\u0027] || null }); }",
+      "storeAs": "registeredAgent"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "screenshot",
+      "description": "Screenshot after table extraction",
+      "milestone": "02-after-table-scraping"
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "download",
+      "description": "Download certificate of good standing if available",
+      "linkSelector": "a:has-text(\u0027certificate of good standing\u0027), a:has-text(\u0027Certificate of Good Standing\u0027)",
+      "validateExtension": ".pdf",
+      "filenamePattern": "${idNumber}-certificateofgoodstanding.pdf",
+      "storeAs": "certificateLocalPath",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text(\u0027certificate of good standing\u0027), a:has-text(\u0027Certificate of Good Standing\u0027)"
+      },
+      "screenshot": {
+        "milestone": "03-after-certificate-download"
+      }
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "click",
+      "description": "Click 'Get certified copies of documents' link to navigate to document list",
+      "target": {
+        "selectors": [
+          { "strategy": "css", "value": "a:has-text('Get certified copies of documents')", "confidence": 0.9 }
+        ],
+        "description": "Get certified copies of documents link"
+      },
+      "waitAfter": "networkidle",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('Get certified copies of documents')"
+      }
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "screenshot",
+      "description": "Screenshot certified copies list page",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('All documents')"
+      },
+      "milestone": "04-certified-copies-list"
+    },
+    {
+      "id": "action-007",
+      "order": 7,
+      "type": "click",
+      "description": "Click 'All documents' link to navigate to certificate print page",
+      "target": {
+        "selectors": [
+          { "strategy": "css", "value": "a:has-text('All documents')", "confidence": 0.9 }
+        ],
+        "description": "All documents link"
+      },
+      "waitAfter": "networkidle",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a:has-text('All documents')"
+      }
+    },
+    {
+      "id": "action-008",
+      "order": 8,
+      "type": "extract",
+      "description": "Extract CertificationViewer.do URL from 'open your form in a new window' link",
+      "javascript": "() => { const link = document.querySelector(\"a[href*='CertificationViewer.do']\"); if (!link) return ''; const href = link.getAttribute('href') || ''; return href.startsWith('http') ? href : new URL(href, window.location.href).toString(); }",
+      "storeAs": "certifiedDocumentsViewerUrl",
+      "condition": {
+        "type": "element-exists",
+        "selector": "a[href*='CertificationViewer.do']"
+      },
+      "screenshot": {
+        "milestone": "05-after-certified-docs-extract"
+      }
+    }
+  ],
+  "output": {
+    "variableName": "details",
+    "type": "EntityDetailResponse",
+    "compose": {
+      "details": "details",
+      "registeredAgent": "registeredAgent",
+      "certificateUrl": "certificateLocalPath",
+      "certifiedDocumentsViewerUrl": "certifiedDocumentsViewerUrl",
+      "certifiedDocumentsUrl": "certifiedDocumentsLocalPath"
+    }
+  }
+}

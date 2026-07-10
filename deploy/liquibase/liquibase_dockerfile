@@ -1,0 +1,9 @@
+FROM liquibase/liquibase:4.33
+
+# Install SQLite JDBC driver for Liquibase
+RUN lpm add sqlite --global
+
+WORKDIR /liquibase/changelog
+COPY deploy/liquibase/ ./
+ENV LIQUIBASE_COMMAND_CHANGELOG_FILE=masterfiles/master-1.0.2603.0.yaml
+CMD ["update"]

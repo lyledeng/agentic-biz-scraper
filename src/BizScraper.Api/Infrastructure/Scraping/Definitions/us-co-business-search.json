@@ -1,0 +1,179 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "90ef5ca9-6e88-4e47-8761-fea52bd1134b",
+    "definitionSlug": "us-co-business-search",
+    "name": "Colorado Business Search",
+    "description": "Search Colorado Secretary of State business database and extract results",
+    "state": "CO",
+    "endpoint": "business-search"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "maxPages",
+      "source": "config"
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do"
+    },
+    {
+      "name": "results",
+      "source": "extracted"
+    },
+    {
+      "name": "pageResults",
+      "source": "extracted"
+    },
+    {
+      "name": "paginationInfo",
+      "source": "extracted"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Colorado SOS search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "fill",
+      "description": "Enter business name",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "input[name=\u0027searchName\u0027]",
+            "confidence": 1
+          }
+        ]
+      },
+      "value": "${searchTerm}"
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "click",
+      "description": "Submit search form",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "input[name=\u0027cmd\u0027][type=\u0027submit\u0027][value=\u0027Search\u0027]",
+            "confidence": 1
+          }
+        ]
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "02-search-results"
+      }
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "check-text",
+      "description": "Detect exceeded record count",
+      "pattern": "Exceeded Record Count",
+      "onMatch": "throw",
+      "errorType": "exceeded-record-count"
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "extract",
+      "description": "Extract search results from first page",
+      "javascript": "() =\u003E { const expectedHeaders = [\u0027#\u0027, \u0027ID Number\u0027, \u0027Document Number\u0027, \u0027Name\u0027, \u0027Event\u0027, \u0027Status\u0027, \u0027Form\u0027, \u0027Formation Date\u0027]; const normalize = (value) =\u003E (value || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const tables = Array.from(document.querySelectorAll(\u0027table\u0027)); const target = tables.find(table =\u003E { const rows = Array.from(table.rows || []); if (rows.length \u003C 2) return false; const headerRow = rows.find(row =\u003E row.querySelectorAll(\u0027:scope \u003E th\u0027).length \u003E= expectedHeaders.length); if (!headerRow) return false; const headers = Array.from(headerRow.querySelectorAll(\u0027:scope \u003E th\u0027)).map(th =\u003E normalize(th.textContent)); return expectedHeaders.every((header, index) =\u003E headers[index] === header) \u0026\u0026 rows.some(row =\u003E row.querySelectorAll(\u0027:scope \u003E td\u0027).length === expectedHeaders.length); }); if (!target) return JSON.stringify([]); const rows = Array.from(target.rows || []).filter(row =\u003E row.querySelectorAll(\u0027:scope \u003E td\u0027).length === expectedHeaders.length).map(row =\u003E { const cells = Array.from(row.querySelectorAll(\u0027:scope \u003E td\u0027)); const link = cells[1]?.querySelector(\u0027a\u0027); const href = link?.getAttribute(\u0027href\u0027) || \u0027\u0027; const detailsUrl = href ? new URL(href, window.location.href).toString() : \u0027\u0027; return { identifier: normalize(cells[2]?.textContent), name: normalize(cells[3]?.textContent), event: normalize(cells[4]?.textContent), status: normalize(cells[5]?.textContent), entityType: normalize(cells[6]?.textContent), formationDate: normalize(cells[7]?.textContent), state: \u0027CO\u0027, detailsUrl }; }); return JSON.stringify(rows); }",
+      "storeAs": "results"
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "extract",
+      "description": "Extract pagination info",
+      "javascript": "() =\u003E { const text = document.body.innerText || \u0027\u0027; const match = text.match(/Found\\s\u002B(\\d\u002B)\\s\u002Bmatching record\\(s\\)\\.\\s\u002BViewing page\\s\u002B(\\d\u002B)\\s\u002Bof\\s\u002B(\\d\u002B)\\./i); return match ? JSON.stringify({ siteTotalCount: parseInt(match[1]), currentPage: parseInt(match[2]), totalPages: parseInt(match[3]) }) : JSON.stringify({ siteTotalCount: -1, currentPage: 1, totalPages: 1 }); }",
+      "storeAs": "paginationInfo"
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "loop",
+      "description": "Paginate through remaining pages",
+      "loopType": "pagination",
+      "maxIterations": 25,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "element-exists",
+          "selector": "a[href*=\u0027pi1=${nextPage}\u0027][title*=\u0027Page\u0027]"
+        }
+      },
+      "actions": [
+        {
+          "id": "action-007",
+          "order": 7,
+          "type": "click",
+          "description": "Click next page link",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "a[href*=\u0027pi1=${nextPage}\u0027][title*=\u0027Page\u0027]",
+                "confidence": 1
+              }
+            ]
+          },
+          "waitAfter": "networkidle",
+          "screenshot": {
+            "milestone": "03-page-${currentPage}"
+          }
+        },
+        {
+          "id": "action-008",
+          "order": 8,
+          "type": "check-text",
+          "description": "Detect error on pagination",
+          "pattern": "Exceeded Record Count",
+          "onMatch": "throw",
+          "errorType": "pagination-error"
+        },
+        {
+          "id": "action-009",
+          "order": 9,
+          "type": "extract",
+          "description": "Extract page results",
+          "javascript": "() =\u003E { const expectedHeaders = [\u0027#\u0027, \u0027ID Number\u0027, \u0027Document Number\u0027, \u0027Name\u0027, \u0027Event\u0027, \u0027Status\u0027, \u0027Form\u0027, \u0027Formation Date\u0027]; const normalize = (value) =\u003E (value || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const tables = Array.from(document.querySelectorAll(\u0027table\u0027)); const target = tables.find(table =\u003E { const rows = Array.from(table.rows || []); if (rows.length \u003C 2) return false; const headerRow = rows.find(row =\u003E row.querySelectorAll(\u0027:scope \u003E th\u0027).length \u003E= expectedHeaders.length); if (!headerRow) return false; const headers = Array.from(headerRow.querySelectorAll(\u0027:scope \u003E th\u0027)).map(th =\u003E normalize(th.textContent)); return expectedHeaders.every((header, index) =\u003E headers[index] === header) \u0026\u0026 rows.some(row =\u003E row.querySelectorAll(\u0027:scope \u003E td\u0027).length === expectedHeaders.length); }); if (!target) return JSON.stringify([]); const rows = Array.from(target.rows || []).filter(row =\u003E row.querySelectorAll(\u0027:scope \u003E td\u0027).length === expectedHeaders.length).map(row =\u003E { const cells = Array.from(row.querySelectorAll(\u0027:scope \u003E td\u0027)); const link = cells[1]?.querySelector(\u0027a\u0027); const href = link?.getAttribute(\u0027href\u0027) || \u0027\u0027; const detailsUrl = href ? new URL(href, window.location.href).toString() : \u0027\u0027; return { identifier: normalize(cells[2]?.textContent), name: normalize(cells[3]?.textContent), event: normalize(cells[4]?.textContent), status: normalize(cells[5]?.textContent), entityType: normalize(cells[6]?.textContent), formationDate: normalize(cells[7]?.textContent), state: \u0027CO\u0027, detailsUrl }; }); return JSON.stringify(rows); }",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "BusinessEntityResult[]"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bizscraper.local/contracts/execute-script-canonical-request.schema.json",
+  "title": "ExecuteScriptCanonicalRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["definition", "parameters"],
+  "properties": {
+    "definition": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Definition slug, e.g. us-ia-business-search"
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Runtime parameters required by selected definition"
+    }
+  }
+}

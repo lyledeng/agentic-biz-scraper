@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bizscraper.local/contracts/execute-script-canonical-envelope.schema.json",
+  "title": "ExecuteScriptCanonicalEnvelope",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["definition", "correlationId", "truncated", "data"],
+  "properties": {
+    "definition": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "data": {
+      "description": "Normalized payload object or array depending on definition"
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "name": "Colorado Business Search",
+  "state": "CO",
+  "endpoint": "business-search",
+  "variables": [
+    { "name": "searchTerm", "source": "runtime", "required": true },
+    { "name": "correlationId", "source": "runtime", "required": true },
+    { "name": "maxPages", "source": "config", "required": false },
+    { "name": "searchEntryUrl", "source": "config", "required": true },
+    { "name": "results", "source": "extracted" },
+    { "name": "pageResults", "source": "extracted" },
+    { "name": "paginationInfo", "source": "extracted" },
+    { "name": "maxPages", "source": "config", "required": false }
+  ],
+  "actions": [
+    {
+      "type": "navigate",
+      "description": "Load Colorado SOS search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": { "milestone": "01-page-load" }
+    },
+    {
+      "type": "fill",
+      "description": "Enter business name",
+      "selector": "input[name='searchName']",
+      "value": "${searchTerm}"
+    },
+    {
+      "type": "click",
+      "description": "Submit search form",
+      "selector": "input[name='cmd'][type='submit'][value='Search']",
+      "waitAfter": "networkidle",
+      "screenshot": { "milestone": "02-search-results" }
+    },
+    {
+      "type": "check-text",
+      "description": "Detect exceeded record count",
+      "pattern": "Exceeded Record Count",
+      "onMatch": "throw",
+      "errorType": "exceeded-record-count"
+    },
+    {
+      "type": "extract",
+      "description": "Extract search results from table",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const tables = Array.from(document.querySelectorAll('table')); for (const table of tables) { const headers = Array.from(table.querySelectorAll('tr:first-child th')).map(th => normalize(th.textContent)); if (!headers.includes('Document Number') && !headers.includes('Name')) continue; const rows = Array.from(table.querySelectorAll('tr')).slice(1); return JSON.stringify(rows.map(row => { const cells = Array.from(row.querySelectorAll('td')).map(td => normalize(td.textContent)); const link = row.querySelector('a[href]'); return { documentNumber: cells[0] || '', name: cells[2] || '', event: cells[3] || '', status: cells[4] || '', form: cells[5] || '', formationDate: cells[6] || '', detailsUrl: link ? new URL(link.getAttribute('href'), window.location.href).toString() : '' }; })); } return '[]'; }",
+      "storeAs": "pageResults"
+    },
+    {
+      "type": "extract",
+      "description": "Extract pagination info",
+      "javascript": "() => { const text = document.body.innerText || ''; const match = text.match(/Viewing page (\\d+) of (\\d+)/); return match ? JSON.stringify({ current: parseInt(match[1]), total: parseInt(match[2]) }) : JSON.stringify({ current: 1, total: 1 }); }",
+      "storeAs": "paginationInfo"
+    },
+    {
+      "type": "loop",
+      "description": "Paginate through remaining pages",
+      "loopType": "pagination",
+      "maxIterations": 25,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "element-exists",
+          "selector": "a[href*='pi1='][title*='Page']"
+        }
+      },
+      "actions": [
+        {
+          "type": "click",
+          "description": "Click next page link",
+          "selector": "a[href*='pi1=${nextPage}'][title*='Page']",
+          "waitAfter": "networkidle",
+          "screenshot": { "milestone": "03-page-${currentPage}" }
+        },
+        {
+          "type": "extract",
+          "description": "Extract page results",
+          "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const tables = Array.from(document.querySelectorAll('table')); for (const table of tables) { const headers = Array.from(table.querySelectorAll('tr:first-child th')).map(th => normalize(th.textContent)); if (!headers.includes('Document Number') && !headers.includes('Name')) continue; const rows = Array.from(table.querySelectorAll('tr')).slice(1); return JSON.stringify(rows.map(row => { const cells = Array.from(row.querySelectorAll('td')).map(td => normalize(td.textContent)); const link = row.querySelector('a[href]'); return { documentNumber: cells[0] || '', name: cells[2] || '', event: cells[3] || '', status: cells[4] || '', form: cells[5] || '', formationDate: cells[6] || '', detailsUrl: link ? new URL(link.getAttribute('href'), window.location.href).toString() : '' }; })); } return '[]'; }",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "BusinessEntityResult[]"
+  }
+}

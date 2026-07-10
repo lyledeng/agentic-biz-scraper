@@ -1,0 +1,81 @@
+<!-- Icon sprites required by child components -->
+<wk-icon-chevron-down-sprite-pds3></wk-icon-chevron-down-sprite-pds3>
+<wk-icon-login-sprite-pds3></wk-icon-login-sprite-pds3>
+<wk-icon-search-sprite-pds3></wk-icon-search-sprite-pds3>
+<wk-icon-settings-sprite-pds3></wk-icon-settings-sprite-pds3>
+
+<!-- Jumpstart Fluid Chrome pattern -->
+<div class="cg3-minh100vh cg3-w100 cg3-flex-col">
+  <!-- Banner -->
+  <header flow-id="banner" class="cg3-border-b cg3-bg">
+    <skip-to-content-pds3 contentId="#mainContent" flowClass="cg3-pad-x-fluid"></skip-to-content-pds3>
+    <div class="banner-fluid">
+      <div class="banner-brand">
+        <logo-pds3 size="small" [isNameHidden]="true" alt="Wolters Kluwer"></logo-pds3>
+        <brand-architecture-pds3
+          href="/"
+          suite="BizScraper"
+          product="Test UI"
+          srLabel="BizScraper Test UI Home"
+        ></brand-architecture-pds3>
+      </div>
+
+      <nav class="banner-nav" aria-label="Primary navigation">
+        <a routerLink="/search" routerLinkActive="nav-active" class="nav-link">
+          <icon-pds3 name="wk-icon-search"></icon-pds3>
+          Business
+        </a>
+      </nav>
+
+      <div class="banner-end">
+        <button-field-pds3 type="icon" size="large">
+          <button type="button" id="api-settings-btn" aria-haspopup="true">
+            <icon-pds3 name="wk-icon-settings"></icon-pds3>
+            <sr-only-pds3>API Settings</sr-only-pds3>
+          </button>
+        </button-field-pds3>
+        <span *ngIf="displayName" class="user-display-name">{{ displayName }}</span>
+        <button-field-pds3 *ngIf="displayName" type="tertiary" size="small">
+          <button type="button" (click)="signOut()">
+            <icon-pds3 name="wk-icon-login"></icon-pds3>
+            Sign out
+          </button>
+        </button-field-pds3>
+      </div>
+    </div>
+    <dropdown-pds3 targetSelector="#api-settings-btn" [detachOnClose]="false">
+      <div class="api-settings-panel">
+        <app-api-config-bar></app-api-config-bar>
+      </div>
+    </dropdown-pds3>
+  </header>
+
+  <!-- Main content -->
+  <main id="mainContent" class="cg3-flex-col cg3-flex-grow">
+    <div class="main-content-area">
+      <router-outlet></router-outlet>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <logo-pds3 size="small" [isNameHidden]="true" alt="Wolters Kluwer"></logo-pds3>
+        <brand-architecture-pds3
+          suite="BizScraper"
+          product="Test UI"
+          href="/"
+          srLabel="BizScraper Test UI Home"
+        ></brand-architecture-pds3>
+      </div>
+      <nav class="footer-links" aria-label="Footer links">
+        <a href="https://www.wolterskluwer.com/en/privacy-cookies" target="_blank" rel="noopener noreferrer">Privacy</a>
+        <a href="https://www.wolterskluwer.com/en/terms-of-use" target="_blank" rel="noopener noreferrer">Terms of use</a>
+      </nav>
+    </div>
+    <div class="footer-bottom">
+      <small>© 2026 Wolters Kluwer N.V. and/or its affiliates. All rights reserved.</small>
+    </div>
+  </footer>
+</div>

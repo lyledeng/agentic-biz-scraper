@@ -1,0 +1,215 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "f3a1b7c4-8d2e-4f59-a6b3-1c0d9e8f7a2b",
+    "definitionSlug": "us-mo-business-search",
+    "name": "Missouri Business Search",
+    "description": "Search Missouri Secretary of State business entity database by name, paginate ASP.NET Web Forms postback results, collapse previous names under parent entities",
+    "state": "MO",
+    "endpoint": "business-search"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true,
+      "description": "Business name to search (Starting With match)"
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://bsd.sos.mo.gov/BusinessEntity/BESearch.aspx?SearchType=0",
+      "description": "Missouri SOS business search page URL"
+    },
+    {
+      "name": "maxPages",
+      "source": "config",
+      "defaultValue": 53,
+      "description": "Maximum number of result pages to scrape (1051 results / 20 per page)"
+    },
+    {
+      "name": "results",
+      "source": "extracted",
+      "description": "Accumulated search results across all pages"
+    },
+    {
+      "name": "pageResults",
+      "source": "extracted",
+      "description": "Results from current page"
+    },
+    {
+      "name": "truncated",
+      "source": "extracted",
+      "description": "Whether results exceed the 1,051 display cap"
+    },
+    {
+      "name": "isLastPage",
+      "source": "extracted",
+      "description": "Set to truthy when current page equals total pages (Telerik RadGrid pager)"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Missouri SOS business entity search page",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "mo-search-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "wait-for-condition",
+      "description": "Wait for Business Name textbox to render",
+      "javascript": "() => !!document.querySelector('input[id*=\"tbBusinessName\"]') || !!document.querySelector('input.swRequiredTextbox')",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "fill",
+      "description": "Enter business name into search field",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "input[id*='tbBusinessName']",
+            "confidence": 0.95
+          },
+          {
+            "strategy": "css",
+            "value": "input.swRequiredTextbox",
+            "confidence": 0.9
+          }
+        ],
+        "description": "Business Name search input"
+      },
+      "value": "${searchTerm}"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "click",
+      "description": "Click SEARCH button to submit ASP.NET postback form",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "a[id*='stdbtnSearch']",
+            "confidence": 0.95
+          },
+          {
+            "strategy": "css",
+            "value": "a.standard-button",
+            "confidence": 0.85
+          }
+        ],
+        "description": "SEARCH submit button"
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "mo-search-02-results"
+      }
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "check-text",
+      "description": "Detect truncation warning when results exceed 1,051 display cap",
+      "pattern": "More than \\d+ records found",
+      "isRegex": true,
+      "onMatch": "flag-truncated",
+      "storeAs": "truncated"
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "extract",
+      "description": "Extract search results from Telerik RadGrid table (10-column rows), collapse previous-name rows into parent entity previousNames array, generate uniqueKey from entity ID in cell[0]",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const table = document.querySelector('table.rgMasterTable'); if (!table) return JSON.stringify([]); const rows = Array.from(table.querySelectorAll('tbody tr')).filter(r => { const cells = r.querySelectorAll('td'); return cells.length === 10 && /^\\d+$/.test(normalize(cells[0].textContent)); }); const entities = new Map(); const previousNames = new Map(); for (const row of rows) { const cells = Array.from(row.querySelectorAll('td')); const entityId = normalize(cells[0].textContent); const nameText = normalize(cells[3].textContent); const isPrevious = nameText.includes('(previous name)'); if (isPrevious) { const prevName = nameText.replace(/\\s*\\(previous name\\)\\s*/i, '').trim(); if (!previousNames.has(entityId)) previousNames.set(entityId, []); previousNames.get(entityId).push(prevName); } else { const charterNo = normalize(cells[4].textContent); const entityType = normalize(cells[5].textContent); const status = normalize(cells[6].textContent); const created = normalize(cells[8].textContent) || null; const agent = normalize(cells[9].textContent) || null; const keyObj = { state: 'US-MO', params: { entityId: entityId } }; const keyJson = JSON.stringify(keyObj); const uniqueKey = btoa(keyJson).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); entities.set(entityId, { name: normalize(cells[2].textContent), identifier: charterNo, entityType: entityType, status: status, formationDate: created, registeredAgentName: agent, previousNames: [], uniqueKey: uniqueKey, state: 'MO' }); } } for (const [id, names] of previousNames) { if (entities.has(id)) { entities.get(id).previousNames = names; } } return JSON.stringify(Array.from(entities.values())); }",
+      "storeAs": "results"
+    },
+    {
+      "id": "action-005b",
+      "order": 6,
+      "type": "extract",
+      "description": "Check if first page is also the last page (single-page result set)",
+      "javascript": "() => { const m = document.body.innerText.match(/Page\\s+(\\d+)\\s+of\\s+(\\d+)/); if (!m) return 'true'; return (m[1] === m[2]) ? 'true' : ''; }",
+      "storeAs": "isLastPage"
+    },
+    {
+      "id": "action-006",
+      "order": 7,
+      "type": "loop",
+      "description": "Paginate through remaining result pages via ASP.NET postback pager buttons",
+      "loopType": "pagination",
+      "maxIterations": 53,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "variable-truthy",
+        "variableName": "isLastPage"
+      },
+      "actions": [
+        {
+          "id": "action-007",
+          "order": 7,
+          "type": "click",
+          "description": "Click next page button",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "input.rgPageNext",
+                "confidence": 0.95
+              },
+              {
+                "strategy": "css",
+                "value": "input[type='submit'][value*='Next']",
+                "confidence": 0.7
+              }
+            ],
+            "description": "Next page pager button (Telerik RadGrid)"
+          },
+          "waitAfter": "networkidle",
+          "screenshot": {
+            "milestone": "mo-search-03-page-${currentPage}"
+          }
+        },
+        {
+          "id": "action-008",
+          "order": 8,
+          "type": "extract",
+          "description": "Check if current page is the last page by parsing Telerik RadGrid pager text 'Page X of Y'",
+          "javascript": "() => { const m = document.body.innerText.match(/Page\\s+(\\d+)\\s+of\\s+(\\d+)/); return (m && m[1] === m[2]) ? 'true' : ''; }",
+          "storeAs": "isLastPage"
+        },
+        {
+          "id": "action-009",
+          "order": 9,
+          "type": "extract",
+          "description": "Extract results from current page (same Telerik RadGrid logic as initial extraction)",
+          "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const table = document.querySelector('table.rgMasterTable'); if (!table) return JSON.stringify([]); const rows = Array.from(table.querySelectorAll('tbody tr')).filter(r => { const cells = r.querySelectorAll('td'); return cells.length === 10 && /^\\d+$/.test(normalize(cells[0].textContent)); }); const entities = new Map(); const previousNames = new Map(); for (const row of rows) { const cells = Array.from(row.querySelectorAll('td')); const entityId = normalize(cells[0].textContent); const nameText = normalize(cells[3].textContent); const isPrevious = nameText.includes('(previous name)'); if (isPrevious) { const prevName = nameText.replace(/\\s*\\(previous name\\)\\s*/i, '').trim(); if (!previousNames.has(entityId)) previousNames.set(entityId, []); previousNames.get(entityId).push(prevName); } else { const charterNo = normalize(cells[4].textContent); const entityType = normalize(cells[5].textContent); const status = normalize(cells[6].textContent); const created = normalize(cells[8].textContent) || null; const agent = normalize(cells[9].textContent) || null; const keyObj = { state: 'US-MO', params: { entityId: entityId } }; const keyJson = JSON.stringify(keyObj); const uniqueKey = btoa(keyJson).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); entities.set(entityId, { name: normalize(cells[2].textContent), identifier: charterNo, entityType: entityType, status: status, formationDate: created, registeredAgentName: agent, previousNames: [], uniqueKey: uniqueKey, state: 'MO' }); } } for (const [id, names] of previousNames) { if (entities.has(id)) { entities.get(id).previousNames = names; } } return JSON.stringify(Array.from(entities.values())); }",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "BusinessEntityResult[]"
+  }
+}

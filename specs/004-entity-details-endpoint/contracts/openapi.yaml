@@ -1,0 +1,198 @@
+openapi: "3.0.3"
+info:
+  title: CO SOS Business Entity Search API — Entity Details
+  version: "1.0.0"
+  description: >
+    Extension endpoint for retrieving structured entity detail information
+    from the Colorado Secretary of State website, including optional
+    Certificate of Good Standing PDF download.
+
+servers:
+  - url: https://localhost:8443
+    description: Local development
+
+paths:
+  /api/v1/entity-details:
+    get:
+      operationId: GetEntityDetails
+      summary: Retrieve entity details and optional certificate of good standing
+      description: >
+        Navigates to the specified CO SOS entity details URL, scrapes the
+        entity Detail and Registered Agent tables, and optionally downloads
+        the Certificate of Good Standing PDF if available and cloud storage
+        is configured.
+      tags:
+        - Entity Details
+      parameters:
+        - name: detailsUrl
+          in: query
+          required: true
+          description: >
+            Full CO SOS entity details URL. Must be HTTPS, host
+            www.sos.state.co.us, path starting with /biz/BusinessEntityDetail.do.
+          schema:
+            type: string
+            format: uri
+            example: "https://www.sos.state.co.us/biz/BusinessEntityDetail.do?queueMode=PQ&masterFileId=20051063025"
+      responses:
+        "200":
+          description: Entity details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityDetailResponse"
+              example:
+                details:
+                  name: "ACME CORPORATION"
+                  status: "Good Standing"
+                  formationDate: "11/02/2005"
+                  idNumber: "20051063025"
+                  form: "Corporation"
+                  periodicReportMonth: "November"
+                  jurisdiction: "Colorado"
+                  principalOfficeStreetAddress: "123 Main St, Denver, CO 80202"
+                  principalOfficeMailingAddress: "PO Box 456, Denver, CO 80201"
+                registeredAgent:
+                  name: "John Smith"
+                  streetAddress: "456 Oak Ave, Denver, CO 80203"
+                  mailingAddress: "456 Oak Ave, Denver, CO 80203"
+                certificate:
+                  available: true
+                  storageUrl: "https://account.blob.core.windows.net/diagnostics/abc123/20051063025-certificateofgoodstanding.pdf"
+                  fileName: "20051063025-certificateofgoodstanding.pdf"
+                  error: null
+        "400":
+          description: >
+            Invalid or disallowed details URL. Returned when the URL fails
+            SSRF allowlist validation (wrong scheme, host, or path).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+        "502":
+          description: >
+            Upstream error. The CO SOS site returned an unexpected response
+            or the page structure could not be parsed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+        "503":
+          description: >
+            Service busy. The maximum number of concurrent entity detail
+            requests has been reached. Retry after the indicated interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+
+components:
+  schemas:
+    EntityDetailResponse:
+      type: object
+      required:
+        - details
+      properties:
+        details:
+          $ref: "#/components/schemas/EntityDetailResult"
+        registeredAgent:
+          $ref: "#/components/schemas/RegisteredAgentResult"
+          nullable: true
+        certificate:
+          $ref: "#/components/schemas/CertificateResult"
+          nullable: true
+
+    EntityDetailResult:
+      type: object
+      required:
+        - name
+        - status
+        - formationDate
+        - idNumber
+        - form
+        - jurisdiction
+      properties:
+        name:
+          type: string
+          description: Full legal name of the entity
+        status:
+          type: string
+          description: "Current entity status (e.g., Good Standing, Delinquent)"
+        formationDate:
+          type: string
+          description: "Formation date as displayed on the CO SOS page (e.g., 11/02/2018)"
+        idNumber:
+          type: string
+          description: CO SOS entity ID number
+        form:
+          type: string
+          description: "Entity form (e.g., Corporation, Limited Liability Company)"
+        periodicReportMonth:
+          type: string
+          nullable: true
+          description: Month when periodic report is due
+        jurisdiction:
+          type: string
+          description: Jurisdiction of formation
+        principalOfficeStreetAddress:
+          type: string
+          nullable: true
+          description: Principal office street address
+        principalOfficeMailingAddress:
+          type: string
+          nullable: true
+          description: Principal office mailing address
+
+    RegisteredAgentResult:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        streetAddress:
+          type: string
+          nullable: true
+        mailingAddress:
+          type: string
+          nullable: true
+
+    CertificateResult:
+      type: object
+      required:
+        - available
+      properties:
+        available:
+          type: boolean
+          description: Whether the "Get a certificate of good standing" link was present
+        storageUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: Cloud storage URL of the uploaded certificate PDF
+        fileName:
+          type: string
+          nullable: true
+          description: "Constructed filename (e.g., 20051063025-certificateofgoodstanding.pdf)"
+        error:
+          type: string
+          nullable: true
+          description: Error message if certificate download/upload failed
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        traceId:
+          type: string

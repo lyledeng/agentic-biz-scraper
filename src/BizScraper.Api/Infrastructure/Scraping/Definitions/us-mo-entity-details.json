@@ -1,0 +1,147 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "e2b0a9d8-7c6f-4e3d-b5a4-0f1e2d3c4b5a",
+    "definitionSlug": "us-mo-entity-details",
+    "name": "Missouri Entity Details",
+    "description": "Extract entity details from Missouri SOS detail page including General Information, Filings with PDF downloads, and Principal Office Address tabs",
+    "state": "MO",
+    "endpoint": "entity-details"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "entityId",
+      "source": "runtime",
+      "required": true,
+      "description": "MO entity ID (injected by handler from decoded uniqueKey)"
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    {
+      "name": "details",
+      "source": "extracted",
+      "description": "General Information tab fields"
+    },
+    {
+      "name": "filings",
+      "source": "extracted",
+      "description": "Filing documents from Filings tab"
+    },
+    {
+      "name": "addresses",
+      "source": "extracted",
+      "description": "Principal office addresses"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load MO entity detail page by ID",
+      "url": "https://bsd.sos.mo.gov/BusinessEntity/BusinessEntityDetail.aspx?page=beSearch&ID=${entityId}",
+      "waitUntil": "networkidle",
+      "screenshot": {
+        "milestone": "mo-detail-01-general-info"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "wait-for-condition",
+      "description": "Wait for General Information tab content to render",
+      "javascript": "() => { const text = document.body.innerText || ''; return text.includes('General Information') || text.includes('Charter No'); }",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "extract",
+      "description": "Extract General Information from Bootstrap div.row/col-3 layout: label-value pairs in swOuterPanelWhiteBox container, agent name from lRegAgentValue span, address from swLabelWrap span. Uses innerText for address fields to preserve line-break whitespace.",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const container = document.querySelector('.swOuterPanelWhiteBox'); if (!container) return JSON.stringify({}); const fields = {}; const rows = container.querySelectorAll('.row'); for (const row of rows) { const cols = Array.from(row.querySelectorAll('[class*=\"col-\"]')); for (let i = 0; i < cols.length - 1; i += 2) { const label = normalize(cols[i].textContent); const value = normalize(cols[i+1].innerText); if (label) fields[label] = value; } } const agentSpan = container.querySelector('[id*=\"lRegAgentValue\"]'); let agentName = null; let agentAddress = null; if (agentSpan) { const nameDiv = agentSpan.querySelector('div[style*=\"padding-bottom\"]') || agentSpan.querySelector(':scope > div'); agentName = nameDiv ? normalize(nameDiv.textContent) : null; const addrSpan = agentSpan.querySelector('.swLabelWrap'); agentAddress = addrSpan ? normalize(addrSpan.innerText) : null; } return JSON.stringify({ name: fields['Name(s)'] || null, entityType: fields['Type'] || null, charterNumber: fields['Charter No.'] || fields['Charter No'] || null, domesticity: fields['Domesticity'] || null, homeState: fields['Home State'] || null, registeredAgentName: agentName, registeredAgentAddress: agentAddress, status: fields['Status'] || null, dateFormed: fields['Date Formed'] || null, duration: fields['Duration'] || null }); }",
+      "storeAs": "details"
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "click",
+      "description": "Click Filings tab to switch via ASP.NET postback",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": ".rtsLink span.rtsTxt:has-text('Filings')",
+            "confidence": 0.9
+          },
+          {
+            "strategy": "css",
+            "value": ".RadTabStrip a:nth-child(2)",
+            "confidence": 0.7
+          }
+        ],
+        "description": "Filings tab link in Telerik RadTabStrip"
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "mo-detail-02-filings"
+      }
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "extract",
+      "description": "Extract filing rows from Telerik RadGrid on Filings tab. Grid has 7 columns: [0]=hidden ID, [1]=order checkbox, [2]=View Document button, [3]=Action, [4]=Type, [5]=Date Filed, [6]=Effective Date. Button onclick calls ShowFiledDocumentForBEFiling(docId, version) which opens popup to /Common/CorrespondenceItemViewHandler.ashx.",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const grids = document.querySelectorAll('table.rgMasterTable'); const target = Array.from(grids).find(g => { const hs = Array.from(g.querySelectorAll('th')).map(h => normalize(h.textContent)); return hs.some(h => h.includes('Date Filed')); }); if (!target) return JSON.stringify([]); const rows = Array.from(target.querySelectorAll('tbody tr')).filter(r => r.querySelectorAll('td').length >= 7); return JSON.stringify(rows.map((row, idx) => { const cells = Array.from(row.querySelectorAll('td')); let docUrl = null; const btn = cells[2]?.querySelector('input[type=submit][value*=\"View\"],input[type=button],button'); if (btn) { const oc = btn.getAttribute('onclick') || ''; const m = oc.match(/ShowFiledDocumentForBEFiling\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)/); if (m) { docUrl = 'https://bsd.sos.mo.gov/Common/CorrespondenceItemViewHandler.ashx?IsTIFF=true&filedDocumentid=' + m[1] + '&version=' + m[2]; } } return { action: normalize(cells[3]?.textContent || ''), documentType: normalize(cells[4]?.textContent || ''), dateFiled: normalize(cells[5]?.textContent || '') || null, effectiveDate: normalize(cells[6]?.textContent || '') || null, rowIndex: idx, hasViewDocument: !!docUrl, storageUrl: docUrl, fileName: null, error: null }; })); }",
+      "storeAs": "filings"
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "click",
+      "description": "Click Principal Office Address tab to switch via ASP.NET postback",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": ".rtsLink span.rtsTxt:has-text('Principal Office Address')",
+            "confidence": 0.9
+          },
+          {
+            "strategy": "css",
+            "value": ".RadTabStrip a:nth-child(3)",
+            "confidence": 0.7
+          }
+        ],
+        "description": "Principal Office Address tab link in Telerik RadTabStrip"
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "mo-detail-03-addresses"
+      }
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "extract",
+      "description": "Extract principal office address rows from visible Telerik RadGrid: 5 columns [id, type, address, since, to]. Uses innerText on address cell to preserve line-break whitespace.",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const grids = document.querySelectorAll('table.rgMasterTable'); const target = Array.from(grids).find(g => { const hs = Array.from(g.querySelectorAll('th')).map(h => normalize(h.textContent)); return hs.some(h => h === 'Address' || h === 'Since'); }); if (!target) return JSON.stringify([]); const rows = Array.from(target.querySelectorAll('tbody tr')).filter(r => r.querySelectorAll('td').length >= 3); return JSON.stringify(rows.map(row => { const cells = Array.from(row.querySelectorAll('td')); return { addressType: normalize(cells[1]?.textContent || ''), address: normalize(cells[2]?.innerText || ''), since: normalize(cells[3]?.textContent || '') || null }; })); }",
+      "storeAs": "addresses"
+    }
+  ],
+  "output": {
+    "variableName": "entityDetails",
+    "type": "EntityDetailResult",
+    "compose": {
+      "details": "details",
+      "filings": "filings",
+      "addresses": "addresses"
+    }
+  }
+}

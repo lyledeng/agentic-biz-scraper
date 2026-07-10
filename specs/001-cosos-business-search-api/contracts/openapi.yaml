@@ -1,0 +1,207 @@
+openapi: "3.1.0"
+info:
+  title: CO SOS Business Entity Search API
+  description: >
+    REST API for searching business entities on the Colorado Secretary of State
+    website. Uses browser automation to scrape results from the CO SOS Business
+    Database Search and returns structured JSON.
+  version: "1.0.2603.0"
+  license:
+    name: MIT
+servers:
+  - url: https://localhost:8443
+    description: Local development
+paths:
+  /api/v1/business-search:
+    get:
+      operationId: searchBusinessEntities
+      summary: Search CO SOS business entities by name
+      description: >
+        Submits a business name search to the Colorado Secretary of State
+        Business Database Search, scrapes results (up to 10 pages), and returns
+        them as a JSON array. Only one search can run at a time.
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: >
+            Business name search term. Must be non-empty and non-whitespace.
+          schema:
+            type: string
+            minLength: 1
+          example: "Acme Construction Colorado"
+      responses:
+        "200":
+          description: Search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+              example:
+                results:
+                  - documentNumber: ""
+                    name: "ACME CONSTRUCTION & PILE COMPANY, Colorado Authority Terminated August 1, 2002"
+                    event: "Batch Event"
+                    status: "Effective"
+                    form: "TRDNM"
+                    formationDate: "08/01/2002"
+                    detailsUrl: "https://www.sos.state.co.us/biz/BusinessEntityDetail.do?quitButtonDestination=BusinessEntityResults&nameTyp=ENT&masterFileId=20001041192&entityId2=20001041192&fileId=&srchTyp=ENTITY"
+                totalCount: 2
+                siteTotalCount: 2
+                truncated: false
+                pagesScraped: 1
+                searchTerm: "Acme Construction Colorado"
+        "400":
+          description: Invalid search term (empty or whitespace-only)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/validation-error"
+                title: "Validation Error"
+                status: 400
+                detail: "Search term must not be empty or whitespace."
+        "422":
+          description: Search term too broad (CO SOS exceeded record count)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/exceeded-record-count"
+                title: "Exceeded Record Count"
+                status: 422
+                detail: "The search term is too broad. The CO SOS site reported: Exceeded Record Count. Please refine your search."
+        "502":
+          description: CO SOS site unreachable, timeout, or scraping failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/upstream-error"
+                title: "Upstream Error"
+                status: 502
+                detail: "Failed to retrieve results from the CO SOS website."
+        "503":
+          description: Another search is already in progress
+          headers:
+            Retry-After:
+              description: Suggested wait time in seconds before retrying
+              schema:
+                type: integer
+                example: 30
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://bizscraper.local/errors/service-busy"
+                title: "Service Busy"
+                status: 503
+                detail: "A search is currently in progress. Please retry after the indicated interval."
+      tags:
+        - Business Search
+
+components:
+  schemas:
+    BusinessEntityResult:
+      type: object
+      required:
+        - documentNumber
+        - name
+        - event
+        - status
+        - form
+        - formationDate
+        - detailsUrl
+      properties:
+        documentNumber:
+          type: string
+          description: Document number from the CO SOS results table (may be empty)
+          example: ""
+        name:
+          type: string
+          description: Full business entity name as displayed on the CO SOS site
+          example: "ACME CONSTRUCTION & PILE COMPANY, Colorado Authority Terminated August 1, 2002"
+        event:
+          type: string
+          description: Event type
+          example: "Batch Event"
+        status:
+          type: string
+          description: Entity status
+          example: "Effective"
+        form:
+          type: string
+          description: Entity form/type code
+          example: "TRDNM"
+        formationDate:
+          type: string
+          description: Formation date in MM/DD/YYYY format as displayed on the site
+          example: "08/01/2002"
+        detailsUrl:
+          type: string
+          format: uri
+          description: Full URL to the business entity detail page on the CO SOS site
+          example: "https://www.sos.state.co.us/biz/BusinessEntityDetail.do?quitButtonDestination=BusinessEntityResults&nameTyp=ENT&masterFileId=20001041192&entityId2=20001041192&fileId=&srchTyp=ENTITY"
+
+    SearchResponse:
+      type: object
+      required:
+        - results
+        - totalCount
+        - siteTotalCount
+        - truncated
+        - pagesScraped
+        - searchTerm
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessEntityResult"
+          description: Array of scraped business entity results
+        totalCount:
+          type: integer
+          description: Number of records in the results array
+          example: 2
+        siteTotalCount:
+          type: integer
+          description: >
+            Total records reported by the CO SOS site. -1 if unavailable.
+          example: 2
+        truncated:
+          type: boolean
+          description: True if pagination was capped at 10 pages
+          example: false
+        pagesScraped:
+          type: integer
+          description: Number of result pages actually scraped
+          example: 1
+        searchTerm:
+          type: string
+          description: Echo of the input search term
+          example: "Acme Construction Colorado"
+
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details for HTTP APIs
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI reference identifying the problem type
+        title:
+          type: string
+          description: Short, human-readable problem summary
+        status:
+          type: integer
+          description: HTTP status code
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence
+        instance:
+          type: string
+          format: uri
+          description: URI reference for the specific occurrence

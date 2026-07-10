@@ -1,0 +1,231 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "a1b2c3d4-5e6f-7890-ab12-cd34ef56gh78",
+    "definitionSlug": "us-wa-business-search",
+    "name": "Washington Business Search",
+    "description": "Search Washington Secretary of State CCFS business entity database by name, paginate AngularJS SPA results (25 per page), extract business name, UBI number, type, principal office, registered agent, and status",
+    "state": "WA",
+    "endpoint": "business-search"
+  },
+  "browser": {
+    "mode": "windows",
+    "channel": "msedge",
+    "headless": false
+  },
+  "variables": [
+    {
+      "name": "searchTerm",
+      "source": "runtime",
+      "required": true,
+      "description": "Business name to search"
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true,
+      "description": "Trace correlation ID from calling client"
+    },
+    {
+      "name": "searchEntryUrl",
+      "source": "config",
+      "required": true,
+      "defaultValue": "https://ccfs.sos.wa.gov/#/",
+      "description": "Washington CCFS Corporation Search SPA URL"
+    },
+    {
+      "name": "maxPages",
+      "source": "config",
+      "defaultValue": 25,
+      "description": "Maximum number of result pages to scrape (25 results per page)"
+    },
+    {
+      "name": "results",
+      "source": "extracted",
+      "description": "Accumulated search results across all pages"
+    },
+    {
+      "name": "pageResults",
+      "source": "extracted",
+      "description": "Results from current page"
+    },
+    {
+      "name": "isLastPage",
+      "source": "extracted",
+      "description": "Set to truthy when current page is the last page"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load Washington CCFS Corporation Search SPA",
+      "url": "${searchEntryUrl}",
+      "waitUntil": "domcontentloaded",
+      "screenshot": {
+        "milestone": "wa-search-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "check-text",
+      "description": "Detect Cloudflare Turnstile challenge page",
+      "pattern": "challenges\\.cloudflare\\.com|Verify you are human",
+      "isRegex": true,
+      "onMatch": "throw",
+      "errorType": "cloudflare-blocked",
+      "errorMessage": "Cloudflare Turnstile challenge detected. Request blocked by anti-bot protection."
+    },
+    {
+      "id": "action-002",
+      "order": 2,
+      "type": "wait-for-condition",
+      "description": "Wait for AngularJS SPA to render Corporation Search Business Name input",
+      "javascript": "() => !!document.querySelector('input[placeholder=\"Business Name\"]')",
+      "timeoutMs": 15000
+    },
+    {
+      "id": "action-002b",
+      "order": 2,
+      "type": "wait-for-condition",
+      "description": "Wait for Cloudflare Turnstile to complete or disappear before interacting (Turnstile widget in login section must finish or it blocks API calls)",
+      "javascript": "() => { var cf = document.querySelector('iframe[src*=\"challenges.cloudflare.com\"]'); if (!cf) return true; try { var box = cf.getBoundingClientRect(); if (box.width === 0 && box.height === 0) return true; } catch(e) { return true; } var text = document.body.innerText; if (text.includes('Verifying')) return false; return true; }",
+      "timeoutMs": 15000
+    },
+    {
+      "id": "action-003",
+      "order": 3,
+      "type": "extract",
+      "description": "Fill Business Name via AngularJS ngModel.$setViewValue for reliable model binding",
+      "javascript": "() => { const searchTerm = '${searchTerm}'; const inputs = Array.from(document.querySelectorAll('input[type=\"text\"], input:not([type])')); const input = inputs.find(i => i.placeholder && i.placeholder.toLowerCase().includes('business')); if (!input) throw new Error('Business Name input not found'); input.focus(); try { const ngModelCtrl = angular.element(input).controller('ngModel'); if (ngModelCtrl) { ngModelCtrl.$setViewValue(searchTerm); ngModelCtrl.$render(); angular.element(input).scope().$apply(); return 'ok'; } } catch(e) {} input.value = searchTerm; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); try { angular.element(input).scope().$apply(); } catch(e2) {} return 'ok'; }",
+      "storeAs": "_fillResult"
+    },
+    {
+      "id": "action-003c",
+      "order": 3,
+      "type": "wait-for-condition",
+      "description": "Wait for Corporation Search button to become enabled after AngularJS processes input",
+      "javascript": "() => { const btns = document.querySelectorAll('button:not([disabled])'); return Array.from(btns).some(b => b.querySelector('strong') && b.textContent.includes('Search')); }",
+      "timeoutMs": 5000
+    },
+    {
+      "id": "action-004",
+      "order": 4,
+      "type": "click",
+      "description": "Click Corporation Search button (enabled after filling Business Name)",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "xpath",
+            "value": "//button[not(@disabled)][.//strong[contains(text(),'Search')]]",
+            "confidence": 0.95
+          },
+          {
+            "strategy": "xpath",
+            "value": "//input[@placeholder='Business Name']/ancestor::div[3]//button[not(@disabled)]",
+            "confidence": 0.85
+          }
+        ],
+        "description": "Corporation Search submit button"
+      },
+      "waitAfter": "domcontentloaded",
+      "screenshot": {
+        "milestone": "wa-search-02-results"
+      }
+    },
+    {
+      "id": "action-005",
+      "order": 5,
+      "type": "wait-for-condition",
+      "description": "Wait for actual result rows to appear. Cloudflare Turnstile may appear on the results page (blocking the API call) — once it auto-resolves in headed Chrome, AngularJS retries the API and rows populate. Wait up to 60s for this full cycle.",
+      "javascript": "() => { var rows = document.querySelectorAll('table.table-striped tbody tr[ng-repeat] td'); if (rows.length > 0) return true; return false; }",
+      "timeoutMs": 60000
+    },
+    {
+      "id": "action-006",
+      "order": 6,
+      "type": "extract",
+      "description": "Extract business entity results from CCFS search results table. Each row includes business name, UBI number, business type, principal office, registered agent, and status. Generate uniqueKey from businessID and businessType via AngularJS scope.",
+      "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const rows = Array.from(document.querySelectorAll('table.table-striped tbody tr[ng-repeat]')); if (!rows.length) return JSON.stringify([]); const results = []; for (const row of rows) { const cells = Array.from(row.querySelectorAll('td')); if (cells.length < 6) continue; const nameCell = cells[0]; const nameLink = nameCell.querySelector('a'); const name = normalize(nameLink ? nameLink.textContent : nameCell.textContent); if (!name) continue; let businessId = null; let businessType = null; try { const scope = angular.element(row).scope(); if (scope && scope.business) { businessId = String(scope.business.BusinessID); businessType = scope.business.BusinessType || ''; } } catch (e) {} const identifier = normalize(cells[1]?.textContent) || null; const entityType = normalize(cells[2]?.textContent) || null; const principalOfficeAddress = normalize(cells[3]?.textContent) || null; const registeredAgentName = normalize(cells[4]?.textContent) || null; const status = normalize(cells[5]?.textContent) || null; let uniqueKey = ''; if (businessId) { const keyObj = { state: 'US-WA', params: { businessId: businessId, businessType: businessType || '' } }; const keyJson = JSON.stringify(keyObj); uniqueKey = btoa(keyJson).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); } results.push({ name: name, identifier: identifier, entityType: entityType, status: status, principalOfficeAddress: principalOfficeAddress, registeredAgentName: registeredAgentName, uniqueKey: uniqueKey, state: 'WA', formationDate: null }); } return JSON.stringify(results); }",
+      "storeAs": "results"
+    },
+    {
+      "id": "action-006b",
+      "order": 7,
+      "type": "extract",
+      "description": "Check if current page is the last page by inspecting pagination controls",
+      "javascript": "() => { const m = document.body.innerText.match(/Page\\s+(\\d+)\\s+of\\s+(\\d+)/); if (!m) return 'true'; return (m[1] === m[2]) ? 'true' : ''; }",
+      "storeAs": "isLastPage"
+    },
+    {
+      "id": "action-007",
+      "order": 8,
+      "type": "loop",
+      "description": "Paginate through remaining result pages by clicking next page button",
+      "loopType": "pagination",
+      "maxIterations": 25,
+      "aggregateInto": "results",
+      "terminateWhen": {
+        "type": "variable-truthy",
+        "variableName": "isLastPage"
+      },
+      "actions": [
+        {
+          "id": "action-008",
+          "order": 8,
+          "type": "click",
+          "description": "Click next page button in pagination controls",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "ul.pagination a[ng-click*='page+1']",
+                "confidence": 0.95
+              },
+              {
+                "strategy": "xpath",
+                "value": "//ul[contains(@class,'pagination')]//a[contains(text(),'\u203a')]",
+                "confidence": 0.85
+              }
+            ],
+            "description": "Next page button in pagination controls"
+          },
+          "waitAfter": "domcontentloaded",
+          "screenshot": {
+            "milestone": "wa-search-03-page-${currentPage}"
+          }
+        },
+        {
+          "id": "action-009",
+          "order": 9,
+          "type": "wait-for-condition",
+          "description": "Wait for new page data to render in AngularJS",
+          "javascript": "() => !!document.querySelector('table.table-striped tbody tr[ng-repeat] td')",
+          "timeoutMs": 15000
+        },
+        {
+          "id": "action-010",
+          "order": 10,
+          "type": "extract",
+          "description": "Check if current page is the last page",
+          "javascript": "() => { const m = document.body.innerText.match(/Page\\s+(\\d+)\\s+of\\s+(\\d+)/); if (!m) return 'true'; return (m[1] === m[2]) ? 'true' : ''; }",
+          "storeAs": "isLastPage"
+        },
+        {
+          "id": "action-011",
+          "order": 11,
+          "type": "extract",
+          "description": "Extract business results from current page",
+          "javascript": "() => { const normalize = (v) => (v || '').replace(/\\s+/g, ' ').trim(); const rows = Array.from(document.querySelectorAll('table.table-striped tbody tr[ng-repeat]')); if (!rows.length) return JSON.stringify([]); const results = []; for (const row of rows) { const cells = Array.from(row.querySelectorAll('td')); if (cells.length < 6) continue; const nameCell = cells[0]; const nameLink = nameCell.querySelector('a'); const name = normalize(nameLink ? nameLink.textContent : nameCell.textContent); if (!name) continue; let businessId = null; let businessType = null; try { const scope = angular.element(row).scope(); if (scope && scope.business) { businessId = String(scope.business.BusinessID); businessType = scope.business.BusinessType || ''; } } catch (e) {} const identifier = normalize(cells[1]?.textContent) || null; const entityType = normalize(cells[2]?.textContent) || null; const principalOfficeAddress = normalize(cells[3]?.textContent) || null; const registeredAgentName = normalize(cells[4]?.textContent) || null; const status = normalize(cells[5]?.textContent) || null; let uniqueKey = ''; if (businessId) { const keyObj = { state: 'US-WA', params: { businessId: businessId, businessType: businessType || '' } }; const keyJson = JSON.stringify(keyObj); uniqueKey = btoa(keyJson).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); } results.push({ name: name, identifier: identifier, entityType: entityType, status: status, principalOfficeAddress: principalOfficeAddress, registeredAgentName: registeredAgentName, uniqueKey: uniqueKey, state: 'WA', formationDate: null }); } return JSON.stringify(results); }",
+          "storeAs": "pageResults"
+        }
+      ]
+    }
+  ],
+  "output": {
+    "variableName": "results",
+    "type": "BusinessEntityResult[]"
+  }
+}

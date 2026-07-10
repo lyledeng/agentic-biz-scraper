@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-liquibase-{{ .Release.Revision }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}-liquibase
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: liquibase
+          image: "{{ .Values.liquibase.image.repository }}:{{ .Values.liquibase.image.tag }}"
+          imagePullPolicy: {{ .Values.liquibase.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "--url=jdbc:sqlite:/data/bizscraper.db"
+            - "update"
+          volumeMounts:
+            - name: sqlite-data
+              mountPath: /data
+      volumes:
+        - name: sqlite-data
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-sqlite-data

@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Readiness Health Check Response",
+  "description": "Response from the /ready endpoint reflecting per-mode browser health status.",
+  "type": "object",
+  "required": ["status", "browserModes"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["Ready", "Degraded", "NotReady"],
+      "description": "Overall readiness. 'Ready' = all modes healthy; 'Degraded' = at least one mode healthy; 'NotReady' = all modes unhealthy."
+    },
+    "browserModes": {
+      "type": "object",
+      "properties": {
+        "local": {
+          "$ref": "#/definitions/ModeStatus"
+        },
+        "remote": {
+          "$ref": "#/definitions/ModeStatus"
+        }
+      },
+      "additionalProperties": false
+    },
+    "definitionsRequiringLocal": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Definition slugs that have browser.mode = 'local'."
+    },
+    "definitionsRequiringRemote": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Definition slugs that have browser.mode = 'remote' (explicit)."
+    }
+  },
+  "definitions": {
+    "ModeStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "unhealthy", "not-configured"],
+          "description": "Health status of this browser mode."
+        },
+        "channel": {
+          "type": ["string", "null"],
+          "description": "Browser channel (local mode only)."
+        },
+        "endpoint": {
+          "type": ["string", "null"],
+          "description": "Remote endpoint URL (remote mode only)."
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Error message if unhealthy."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

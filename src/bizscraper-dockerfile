@@ -1,0 +1,39 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /https && openssl req -x509 -nodes -days 30 -newkey rsa:2048 -keyout /https/tls.key -out /https/tls.crt -subj "/CN=localhost"
+
+COPY . .
+RUN dotnet restore BizScraper.slnx
+RUN dotnet publish src/BizScraper.Api/BizScraper.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS dotnet10
+
+FROM mcr.microsoft.com/playwright/dotnet:v1.58.0-noble AS runtime
+WORKDIR /app
+
+# Install Google Chrome stable for Akamai CDN compatibility (real TLS fingerprint)
+RUN apt-get update && \
+    apt-get install -y wget gnupg && \
+    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && \
+    apt-get install -y google-chrome-stable --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=dotnet10 /usr/share/dotnet /usr/share/dotnet
+COPY --from=dotnet10 /usr/bin/dotnet /usr/bin/dotnet
+COPY --from=build /https /https
+
+COPY --from=build /app/publish .
+
+ENV TZ=America/Chicago
+ENV ASPNETCORE_URLS=https://+:8443
+ENV ASPNETCORE_Kestrel__Certificates__Default__Path=/https/tls.crt
+ENV ASPNETCORE_Kestrel__Certificates__Default__KeyPath=/https/tls.key
+ENV Playwright__BrowserChannel=chrome
+
+EXPOSE 8443
+
+ENTRYPOINT ["dotnet", "BizScraper.Api.dll"]

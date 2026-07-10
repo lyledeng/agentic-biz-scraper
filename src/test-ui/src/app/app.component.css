@@ -1,0 +1,131 @@
+/* Fluid Banner — per Jumpstart chrome pattern */
+.banner-fluid {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cg3-spacing);
+  min-height: 3.25rem;
+  padding-inline: var(--cg3-spacing);
+
+  @media (min-width: 1024px) {
+    min-height: 3.75rem;
+    padding-inline: var(--cg3-spacing-double);
+  }
+}
+
+.banner-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--cg3-spacing-half);
+  flex-shrink: 0;
+}
+
+.banner-nav {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+}
+
+/* Navigation link */
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cg3-spacing-quarter);
+  padding: var(--cg3-spacing-half) var(--cg3-spacing);
+  border-radius: var(--cg3-border-radius);
+  text-decoration: none;
+  font-size: var(--cg3-font-size-1);
+  font-weight: var(--cg3-font-weight-medium);
+  color: var(--cg3-color-text-primary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.nav-link:hover {
+  background-color: var(--cg3-interactive-color-bg-hover);
+  color: var(--cg3-color-text-primary);
+  text-decoration: none;
+}
+
+.nav-active {
+  background-color: var(--cg3-interactive-color-bg-selected-subtle);
+  color: var(--cg3-interactive-color-text-selected);
+}
+
+/* Banner end section */
+.banner-end {
+  display: flex;
+  align-items: center;
+  gap: var(--cg3-spacing);
+  flex-shrink: 0;
+}
+
+.user-display-name {
+  font-size: var(--cg3-font-size-1);
+  color: var(--cg3-color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Main content area */
+.main-content-area {
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--cg3-spacing-one-and-half) var(--cg3-spacing);
+
+  @media (min-width: 1024px) {
+    padding: var(--cg3-spacing-double);
+  }
+}
+
+/* API Settings dropdown panel */
+.api-settings-panel {
+  padding: var(--cg3-spacing);
+  min-width: 20rem;
+}
+
+/* Footer */
+.app-footer {
+  background: var(--cg3-color-monochrome-white);
+  border-top: 1px solid var(--cg3-border-color, #dadada);
+  padding: var(--cg3-spacing-one-and-half) var(--cg3-spacing);
+
+  @media (min-width: 1024px) {
+    padding: var(--cg3-spacing-one-and-half) var(--cg3-spacing-double);
+  }
+}
+
+.footer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--cg3-spacing);
+}
+
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--cg3-spacing-half);
+}
+
+.footer-links {
+  display: flex;
+  gap: var(--cg3-spacing-one-and-half);
+}
+
+.footer-links a {
+  color: var(--cg3-color-blue-500);
+  text-decoration: none;
+  font-size: var(--cg3-font-size-1);
+}
+
+.footer-links a:hover {
+  text-decoration: underline;
+}
+
+.footer-bottom {
+  margin-top: var(--cg3-spacing);
+  color: var(--cg3-color-text-secondary);
+  font-size: var(--cg3-font-size-0);
+}

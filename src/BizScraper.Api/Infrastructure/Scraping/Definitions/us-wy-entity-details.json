@@ -1,0 +1,311 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "3ebe3b50-7d19-422c-bdde-56e10bf2a6be",
+    "definitionSlug": "us-wy-entity-details",
+    "name": "Wyoming Entity Details",
+    "description": "Extract entity details from Wyoming business filing details page",
+    "state": "WY",
+    "endpoint": "entity-details"
+  },
+  "browser": {
+    "mode": "local"
+  },
+  "variables": [
+    {
+      "name": "detailsUrl",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "correlationId",
+      "source": "runtime",
+      "required": true
+    },
+    {
+      "name": "idNumber",
+      "source": "extracted"
+    },
+    {
+      "name": "certificateLocalPath",
+      "source": "extracted"
+    },
+    {
+      "name": "details",
+      "source": "extracted"
+    },
+    {
+      "name": "registeredAgent",
+      "source": "extracted"
+    },
+    {
+      "name": "parties",
+      "source": "extracted"
+    },
+    {
+      "name": "historyDocuments",
+      "source": "extracted"
+    },
+    {
+      "name": "captchaImageDataUrl",
+      "source": "extracted"
+    },
+    {
+      "name": "captchaSolution",
+      "source": "extracted"
+    },
+    {
+      "name": "certificateError",
+      "source": "extracted"
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-000",
+      "order": 0,
+      "type": "navigate",
+      "description": "Load WY entity details page",
+      "url": "${detailsUrl}",
+      "waitUntil": "load",
+      "screenshot": {
+        "milestone": "wy-detail-01-page-load"
+      }
+    },
+    {
+      "id": "action-001",
+      "order": 1,
+      "type": "loop",
+      "description": "Solve CAPTCHA if present (retry up to 3 times)",
+      "loopType": "retry",
+      "maxIterations": 3,
+      "terminateWhen": {
+        "type": "not",
+        "condition": {
+          "type": "text-contains",
+          "text": "What code is in the image?"
+        }
+      },
+      "actions": [
+        {
+          "id": "action-002",
+          "order": 2,
+          "type": "extract",
+          "description": "Capture CAPTCHA image bytes",
+          "javascript": "async () =\u003E { const images = Array.from(document.querySelectorAll(\u0027img\u0027)); let best = null; let bestArea = 0; for (const img of images) { const rect = img.getBoundingClientRect(); const area = rect.width * rect.height; if (area \u003E 6000 \u0026\u0026 area \u003E bestArea \u0026\u0026 img.offsetParent !== null) { best = img; bestArea = area; } } if (!best) return null; const canvas = document.createElement(\u0027canvas\u0027); canvas.width = best.naturalWidth || best.width; canvas.height = best.naturalHeight || best.height; const ctx = canvas.getContext(\u00272d\u0027); ctx.drawImage(best, 0, 0); const dataUrl = canvas.toDataURL(\u0027image/png\u0027); return dataUrl; }",
+          "storeAs": "captchaImageDataUrl"
+        },
+        {
+          "id": "action-003",
+          "order": 3,
+          "type": "screenshot",
+          "description": "Screenshot CAPTCHA challenge",
+          "milestone": "wy-detail-captcha-attempt-${iterationCount}",
+          "force": true
+        },
+        {
+          "id": "action-004",
+          "order": 4,
+          "type": "call-service",
+          "description": "Solve CAPTCHA via external service",
+          "serviceName": "captcha-solver",
+          "inputVariable": "captchaImageDataUrl",
+          "outputVariable": "captchaSolution"
+        },
+        {
+          "id": "action-005",
+          "order": 5,
+          "type": "fill",
+          "description": "Enter CAPTCHA solution",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "#ans, #MainContent_txtCaptcha, input[name=\u0027answer\u0027], input[name*=\u0027Captcha\u0027], input[name*=\u0027captcha\u0027]",
+                "confidence": 1
+              }
+            ]
+          },
+          "value": "${captchaSolution}"
+        },
+        {
+          "id": "action-006",
+          "order": 6,
+          "type": "click",
+          "description": "Submit CAPTCHA",
+          "target": {
+            "selectors": [
+              {
+                "strategy": "css",
+                "value": "#jar, #MainContent_btnSubmit, button[type=\u0027submit\u0027], input[type=\u0027submit\u0027]",
+                "confidence": 1
+              }
+            ]
+          },
+          "waitAfter": "networkidle"
+        },
+        {
+          "id": "action-007",
+          "order": 7,
+          "type": "screenshot",
+          "description": "Screenshot after CAPTCHA submission",
+          "milestone": "wy-detail-captcha-submitted-${iterationCount}",
+          "force": true
+        }
+      ]
+    },
+    {
+      "id": "action-008",
+      "order": 8,
+      "type": "screenshot",
+      "description": "Screenshot after CAPTCHA resolved",
+      "milestone": "wy-detail-02-after-captcha"
+    },
+    {
+      "id": "action-009",
+      "order": 9,
+      "type": "extract",
+      "description": "Extract entity detail block \u2014 Name, FilingId, Type, Status, SubStatus, InitialFilingDate, standings, InactiveDate, TermOfDuration, FormedIn, addresses, RA, additional details",
+      "javascript": "() =\u003E { const t = (id) =\u003E { const el = document.getElementById(id); return el ? (el.textContent || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; }; const n = (v) =\u003E v || null; return JSON.stringify({ name: t(\u0027txtFilingName\u0027) || t(\u0027txtFilingName2\u0027), status: t(\u0027txtStatus\u0027), formationDate: t(\u0027txtInitialDate\u0027), idNumber: t(\u0027txtFilingNum\u0027), form: t(\u0027txtFilingType\u0027), periodicReportMonth: null, jurisdiction: t(\u0027txtFormation\u0027), principalOfficeStreetAddress: n(t(\u0027txtOfficeAddresss\u0027)), principalOfficeMailingAddress: n(t(\u0027txtMailAddress\u0027)), subStatus: n(t(\u0027txtSubStatus\u0027)), standingTax: n(t(\u0027txtStanding\u0027)), standingRA: n(t(\u0027txtStandingRA\u0027)), standingOther: n(t(\u0027txtStandingOther\u0027)), inactiveDate: n(t(\u0027txtInactiveDate\u0027)), termOfDuration: n(t(\u0027txtDuration\u0027)), formedIn: n(t(\u0027txtFormation\u0027)), latestAnnualReportYear: n(t(\u0027txtLatestAR\u0027)), annualReportExempt: n(t(\u0027txtARExempt\u0027)), licenseTaxPaid: n(t(\u0027txtTaxPaid\u0027)) }); }",
+      "storeAs": "details"
+    },
+    {
+      "id": "action-010",
+      "order": 11,
+      "type": "extract",
+      "description": "Extract registered agent name and address",
+      "javascript": "() =\u003E { const t = (id) =\u003E { const el = document.getElementById(id); return el ? (el.textContent || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; }; const name = t(\u0027txtAgentName\u0027); if (!name) return null; return JSON.stringify({ name: name || null, streetAddress: t(\u0027txtAgentAddress\u0027) || null, mailingAddress: null }); }",
+      "storeAs": "registeredAgent"
+    },
+    {
+      "id": "action-011",
+      "order": 12,
+      "type": "extract",
+      "description": "Extract parties from divParties container",
+      "javascript": "() =\u003E { const container = document.getElementById(\u0027divParties\u0027); if (!container) return JSON.stringify([]); const text = (container.textContent || \u0027\u0027).trim(); if (text.includes(\u0027None Currently Assigned\u0027)) return JSON.stringify([]); const normalize = (v) =\u003E (v || \u0027\u0027).replace(/\\s\u002B/g, \u0027 \u0027).trim(); const parties = []; const entries = container.querySelectorAll(\u0027div.row, div[class*=\u0022party\u0022], div[class*=\u0022Party\u0022], li, tr\u0027); for (const entry of entries) { const fullText = normalize(entry.textContent); if (fullText.length \u003C 3) continue; const roleMatch = fullText.match(/\\(([^)]\u002B)\\)/); const role = roleMatch ? roleMatch[1] : \u0027Unknown\u0027; let name = fullText.replace(/\\([^)]\u002B\\)/, \u0027\u0027).split(/Organization:|Address:/)[0]; let org = null; let addr = null; if (fullText.includes(\u0027Organization:\u0027)) { org = fullText.split(\u0027Organization:\u0027)[1].split(\u0027Address:\u0027)[0]; } if (fullText.includes(\u0027Address:\u0027)) { addr = fullText.split(\u0027Address:\u0027).pop(); } if (normalize(name).length \u003E 0) { parties.push({ name: normalize(name), role: normalize(role), organization: org ? normalize(org) : null, address: addr ? normalize(addr) : null }); } } return JSON.stringify(parties); }",
+      "storeAs": "parties"
+    },
+    {
+      "id": "action-009b",
+      "order": 10,
+      "type": "extract",
+      "description": "Extract idNumber into top-level variable for certificate lookup",
+      "javascript": "() => { const el = document.getElementById('txtFilingNum'); return el ? (el.textContent || '').replace(/\\s+/g, ' ').trim() : ''; }",
+      "storeAs": "idNumber"
+    },
+    {
+      "id": "action-012",
+      "order": 13,
+      "type": "screenshot",
+      "description": "Screenshot after extraction",
+      "milestone": "wy-detail-03-after-extraction"
+    },
+    {
+      "id": "action-013",
+      "order": 14,
+      "type": "extract",
+      "description": "Extract history documents from divHistorySummary (all documents with PDF icons)",
+      "javascript": "() =\u003E { const container = document.getElementById(\u0027divHistorySummary\u0027); if (!container) return JSON.stringify([]); const sections = container.querySelectorAll(\u0027section.row-fluid\u0027); const docs = []; for (const section of sections) { const icon = section.querySelector(\u0027i.fhPdf.fh_On\u0027); if (!icon) continue; const onclick = icon.getAttribute(\u0027onclick\u0027) || \u0027\u0027; const m = onclick.match(/GetImages\\(\u0022([^\u0022]\u002B)\u0022,\\s*\u0022([^\u0022]\u002B)\u0022\\)/); if (!m) continue; const refDiv = section.querySelector(\u0027.fhRef\u0027); const dateDiv = section.querySelector(\u0027.fhDate\u0027); const title = refDiv ? refDiv.textContent.replace(/\\s\u002B/g, \u0027 \u0027).trim() : \u0027\u0027; const dateMatch = dateDiv ? dateDiv.textContent.match(/(\\d{2}\\/\\d{2}\\/\\d{4})/) : null; const date = dateMatch ? dateMatch[1] : \u0027\u0027; const storageUrl = \u0027https://wyobiz.wyo.gov/Business/GetImages.aspx?sid=\u0027 \u002B m[1] \u002B \u0027\u0026stid=\u0027 \u002B m[2]; const slug = title.replace(/[^a-zA-Z0-9]\u002B/g, \u0027-\u0027).replace(/^-|-$/g, \u0027\u0027).toLowerCase(); docs.push({ eventTitle: title, date: date, storageUrl: storageUrl, fileName: slug \u002B \u0027.pdf\u0027, error: null }); } return JSON.stringify(docs); }",
+      "storeAs": "historyDocuments"
+    },
+    {
+      "id": "action-014",
+      "order": 15,
+      "type": "navigate",
+      "group": "certificate",
+      "description": "Load WY certificate search page",
+      "url": "https://wyobiz.wyo.gov/Business/ViewCertificate.aspx",
+      "waitUntil": "load",
+      "screenshot": {
+        "milestone": "wy-cert-01-search-page"
+      }
+    },
+    {
+      "id": "action-015",
+      "order": 16,
+      "type": "fill",
+      "group": "certificate",
+      "description": "Enter filing ID on certificate page",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "#MainContent_txtFilingID",
+            "confidence": 1
+          }
+        ]
+      },
+      "value": "${idNumber}"
+    },
+    {
+      "id": "action-016",
+      "order": 17,
+      "type": "click",
+      "group": "certificate",
+      "description": "Submit certificate search",
+      "target": {
+        "selectors": [
+          {
+            "strategy": "css",
+            "value": "#MainContent_SearchButton",
+            "confidence": 1
+          }
+        ]
+      },
+      "waitAfter": "networkidle",
+      "screenshot": {
+        "milestone": "wy-cert-02-verification-page"
+      }
+    },
+    {
+      "id": "action-016b",
+      "order": 18,
+      "type": "extract",
+      "group": "certificate",
+      "description": "Check certificate eligibility — detect ineligibility alert",
+      "javascript": "() => { const text = document.body.innerText || ''; if (text.includes('Certificates may only be printed when the entity Standing')) { return 'Entity is not in good standing. Certificates may only be printed when the entity Standing is Good.'; } return ''; }",
+      "storeAs": "certificateError"
+    },
+    {
+      "id": "action-016c",
+      "order": 19,
+      "type": "screenshot",
+      "group": "certificate",
+      "description": "Screenshot ineligibility alert state (when Print button absent)",
+      "milestone": "wy-cert-02-ineligibility-alert",
+      "condition": {
+        "type": "variable-truthy",
+        "variableName": "certificateError"
+      }
+    },
+    {
+      "id": "action-017",
+      "order": 20,
+      "type": "download",
+      "group": "certificate",
+      "description": "Download WY certificate PDF from Print button",
+      "linkSelector": "#MainContent_ContinueButton",
+      "validateExtension": ".pdf",
+      "filenamePattern": "${idNumber}-certificateofgoodstanding.pdf",
+      "storeAs": "certificateLocalPath",
+      "condition": {
+        "type": "element-exists",
+        "selector": "#MainContent_ContinueButton"
+      },
+      "screenshot": {
+        "milestone": "wy-cert-03-after-download"
+      }
+    }
+  ],
+  "output": {
+    "variableName": "details",
+    "type": "EntityDetailResponse",
+    "compose": {
+      "details": "details",
+      "registeredAgent": "registeredAgent",
+      "parties": "parties",
+      "historyDocuments": "historyDocuments",
+      "certificateUrl": "certificateLocalPath",
+      "certificateError": "certificateError"
+    }
+  }
+}
