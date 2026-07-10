@@ -2,7 +2,9 @@ using BizScraper.Api.Infrastructure.Scraping.Engine.Models;
 
 namespace BizScraper.Api.Infrastructure.Scraping.Engine.Actions;
 
-internal sealed class FillActionHandler(TargetResolver targetResolver) : IActionHandler
+internal sealed class FillActionHandler(
+    TargetResolver targetResolver,
+    IAgentFallbackActionExecutor? agentFallbackActionExecutor = null) : IActionHandler
 {
     private const int DefaultSelectorTimeoutMs = 5000;
 
@@ -26,20 +28,41 @@ internal sealed class FillActionHandler(TargetResolver targetResolver) : IAction
 
         if (action.Target is not null)
         {
-            var timeoutMs = context.Environment?.SelectorTimeoutMs ?? DefaultSelectorTimeoutMs;
-            var locator = await targetResolver.ResolveAsync(
-                action.Target,
-                context.Page,
-                context.Variables,
-                timeoutMs,
-                cancellationToken,
-                BrowserActionType.Fill);
-            await locator.FillAsync(value);
+            try
+            {
+                var timeoutMs = context.Environment?.SelectorTimeoutMs ?? DefaultSelectorTimeoutMs;
+                var locator = await targetResolver.ResolveAsync(
+                    action.Target,
+                    context.Page,
+                    context.Variables,
+                    timeoutMs,
+                    cancellationToken,
+                    BrowserActionType.Fill);
+                await locator.FillAsync(value);
+                return;
+            }
+            catch (TargetResolutionException) when (agentFallbackActionExecutor is not null)
+            {
+                var observation = new BrowserObservation(
+                    context.Page.Url,
+                    await context.Page.TitleAsync(),
+                    [],
+                    BrowserActionType.Fill,
+                    action.Target.Description,
+                    DateTimeOffset.UtcNow);
+
+                var request = new FillActionRequest(observation, action.Target.Description, value, null);
+                var fallbackResult = await agentFallbackActionExecutor.ExecuteFillAsync(request, cancellationToken);
+                if (fallbackResult.Success)
+                {
+                    return;
+                }
+
+                throw;
+            }
         }
-        else
-        {
-            var selector = VariableSubstitution.Resolve(action.Selector, context.Variables);
-            await context.Page.Locator(selector).FillAsync(value);
-        }
+
+        var selector = VariableSubstitution.Resolve(action.Selector, context.Variables);
+        await context.Page.Locator(selector).FillAsync(value);
     }
 }

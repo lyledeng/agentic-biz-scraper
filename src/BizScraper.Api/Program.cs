@@ -202,7 +202,7 @@ builder.Services.AddSingleton<PostFlowDocumentProcessorRegistry>();
 builder.Services.AddScoped<ExecuteScriptHandler>();
 
 // JSON Scraping Engine
-builder.Services.AddSingleton<IAgentTargetResolver, NoOpAgentTargetResolver>();
+builder.Services.AddSingleton<IAgentFallbackActionExecutor, NoOpAgentFallbackActionExecutor>();
 builder.Services.AddSingleton<TargetResolver>();
 builder.Services.AddSingleton<ConditionEvaluator>();
 builder.Services.AddSingleton<OutputSchemaValidator>();
