@@ -19,7 +19,10 @@ public sealed record BrowserObservation(
     BrowserActionType ActionType,
     string? TargetDescription,
     DateTimeOffset Timestamp,
-    BrowserScreenshot? Screenshot = null)
+    BrowserScreenshot? Screenshot = null,
+    string? FailureType = null,
+    string? FailureMessage = null,
+    string? OriginalSelector = null)
 {
     public string Url => CurrentUrl;
 }

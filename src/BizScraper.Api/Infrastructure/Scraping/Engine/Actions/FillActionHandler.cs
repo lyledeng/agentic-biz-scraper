@@ -1,4 +1,5 @@
 using BizScraper.Api.Infrastructure.Scraping.Engine.Models;
+using Microsoft.Playwright;
 
 namespace BizScraper.Api.Infrastructure.Scraping.Engine.Actions;
 
@@ -25,14 +26,15 @@ internal sealed class FillActionHandler(
     public async Task ExecuteAsync(ActionContext context, FlowActionV2 action, CancellationToken cancellationToken)
     {
         var value = VariableSubstitution.Resolve(action.Value, context.Variables);
+        var target = action.Target;
 
-        if (action.Target is not null)
+        if (target is not null)
         {
             try
             {
                 var timeoutMs = context.Environment?.SelectorTimeoutMs ?? DefaultSelectorTimeoutMs;
                 var locator = await targetResolver.ResolveAsync(
-                    action.Target,
+                    target,
                     context.Page,
                     context.Variables,
                     timeoutMs,
@@ -41,15 +43,32 @@ internal sealed class FillActionHandler(
                 await locator.FillAsync(value);
                 return;
             }
-            catch (TargetResolutionException) when (agentFallbackActionExecutor is not null)
+            catch (TargetResolutionException ex) when (agentFallbackActionExecutor is not null)
             {
+                BrowserScreenshot? screenshot = null;
+                try
+                {
+                    var bytes = await context.Page.ScreenshotAsync(new PageScreenshotOptions { FullPage = false });
+                    screenshot = new BrowserScreenshotBytes(bytes);
+                }
+                catch
+                {
+                    screenshot = null;
+                }
+
+                var originalSelector = target?.Selectors?.FirstOrDefault()?.Value ?? action.Selector;
+                var attemptedSelectors = ex.AttemptedSelectors?.ToList() ?? [];
                 var observation = new BrowserObservation(
                     context.Page.Url,
                     await context.Page.TitleAsync(),
-                    [],
+                    attemptedSelectors,
                     BrowserActionType.Fill,
-                    action.Target.Description,
-                    DateTimeOffset.UtcNow);
+                    target?.Description,
+                    DateTimeOffset.UtcNow,
+                    screenshot,
+                    ex.GetType().Name,
+                    ex.Message,
+                    attemptedSelectors.FirstOrDefault() ?? originalSelector);
 
                 var request = new FillActionRequest(observation, action.Target.Description, value, null);
                 var fallbackResult = await agentFallbackActionExecutor.ExecuteFillAsync(request, cancellationToken);
